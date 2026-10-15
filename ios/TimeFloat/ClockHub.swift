@@ -147,9 +147,10 @@ final class ClockHub: ObservableObject {
     // MARK: - 每秒 20 次的界面刷新
 
     private func tick() {
-        let bj = beijing.utcMsOrNil()
-        let tb = taobao.utcMsOrNil()
-        let jd = jd.utcMsOrNil()
+        // 注意变量名：不能叫 bj/tb/jd，否则会把同名的时钟属性遮住（Swift 会报类型不匹配）
+        let bjMs = beijing.utcMsOrNil()
+        let tbMs = taobao.utcMsOrNil()
+        let jdMs = jd.utcMsOrNil()
 
         func line(_ c: ServerClock, _ t: Int64?, _ base: Int64?) -> ClockLine {
             let time = t.map { Fmt.hms($0) } ?? "--:--:--.---"
@@ -161,7 +162,7 @@ final class ClockHub: ObservableObject {
                              deltaText: delta, color: c.accentColor, failed: !c.synced && c.state == .fail)
         }
 
-        lines = [line(beijing, bj, bj), line(taobao, tb, bj), line(jd, jd, bj)]
+        lines = [line(beijing, bjMs, bjMs), line(taobao, tbMs, bjMs), line(jd, jdMs, bjMs)]
 
         // ★ 本机墙钟 vs「当前选中的那一路服务器」——不是写死北京时间
         let sel = selected
