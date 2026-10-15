@@ -70,17 +70,11 @@ final class ClockHub: ObservableObject {
     }
 
     func refreshAll() {
+        // ★ 走 syncLoopOnce 而不是自己 new Task：它会登记 inFlight，
+        //   否则手动刷新和看门狗自愈可能同时对同一个源发两轮请求，
+        //   两个结果乱序写回同一个时钟。
         for c in clocks {
-            Task { [weak self] in
-                c.markSyncing()
-                do {
-                    let s = try await Sampler.run(c.source)
-                    c.apply(s)
-                } catch {
-                    c.markFail(error.localizedDescription)
-                }
-                self?.tick()
-            }
+            Task { [weak self] in await self?.syncLoopOnce(c) }
         }
     }
 
@@ -116,26 +110,32 @@ final class ClockHub: ObservableObject {
         }
     }
 
-    private func syncLoopOnce(_ clock: ServerClock) async {
-        guard !inFlight.contains(clock.id) else { return }
+    @discardableResult
+    private func syncLoopOnce(_ clock: ServerClock) async -> Bool {
+        guard !inFlight.contains(clock.id) else { return false }
         inFlight.insert(clock.id)
         defer { inFlight.remove(clock.id) }
         clock.markSyncing()
+        var held = false
         do {
             let s = try await Sampler.run(clock.source)
-            clock.apply(s)
+            held = clock.apply(s) == .heldSuspicious
         } catch {
             clock.markFail(error.localizedDescription)
         }
         tick()
+        return held
     }
 
     private func syncLoop(_ clock: ServerClock) async {
         while running {
-            await syncLoopOnce(clock)
+            let held = await syncLoopOnce(clock)
             guard running else { break }
             let delay: UInt64
-            if clock.state == .ok {
+            if held {
+                // 被"暂缓采纳"时要尽快来第二轮确认，别等 60 秒
+                delay = Cfg.retryOnFailMs
+            } else if clock.state == .ok {
                 delay = clock.preciseMs ? Cfg.resyncPreciseMs : Cfg.resyncCoarseMs
             } else {
                 delay = Cfg.retryOnFailMs
@@ -162,37 +162,51 @@ final class ClockHub: ObservableObject {
                              deltaText: delta, color: c.accentColor, failed: !c.synced && c.state == .fail)
         }
 
-        lines = [line(beijing, bjMs, bjMs), line(taobao, tbMs, bjMs), line(jd, jdMs, bjMs)]
+        // ★ 先算成局部值，**只有真的变了才赋值给 @Published**。
+        //   这个函数每帧都在跑（默认 20~30fps），@Published 每次赋值都会让 SwiftUI
+        //   重建整棵视图树 —— 不守卫的话界面 24 小时都在空转重绘（耗电 + 掉帧）。
+        let newLines = [line(beijing, bjMs, bjMs), line(taobao, tbMs, bjMs), line(jd, jdMs, bjMs)]
 
         // ★ 本机墙钟 vs「当前选中的那一路服务器」——不是写死北京时间
         let sel = selected
+        let newSkewText: String
+        let newSkewTint: Color
         if sel.utcMsOrNil() == nil {
-            localSkewText = "本机墙钟：\(sel.label)服务器还没校上，暂时比不出来"
-            localSkewTint = .yellow
+            newSkewText = "本机墙钟：\(sel.label)服务器还没校上，暂时比不出来"
+            newSkewTint = .yellow
         } else {
             let fast = sel.localWallFastMs()
-            localSkewText = fast >= 0
+            newSkewText = fast >= 0
                 ? "本机墙钟比\(sel.label)服务器快 \(fast)ms"
                 : "本机墙钟比\(sel.label)服务器慢 \(-fast)ms"
-            localSkewTint = abs(fast) <= 50 ? .green : (abs(fast) <= 200 ? .yellow : .red)
+            newSkewTint = abs(fast) <= 50 ? .green : (abs(fast) <= 200 ? .yellow : .red)
         }
 
         let cross = crossCheck()
+        let newCrossText: String
+        let newCrossTint: Color
         switch cross.level {
         case 0:
-            crossText = "\(cross.text) · 一致（可信）"
-            crossTint = .green
+            newCrossText = "\(cross.text) · 一致（可信）"
+            newCrossTint = .green
         case 1:
-            crossText = "\(cross.text) · 略有差异"
-            crossTint = .yellow
+            newCrossText = "\(cross.text) · 略有差异"
+            newCrossTint = .yellow
         case 2...:
-            crossText = "\(cross.text) · 差异偏大，注意核对"
-            crossTint = .red
+            newCrossText = "\(cross.text) · 差异偏大，注意核对"
+            newCrossTint = .red
         default:
-            crossText = cross.text          // 可用源不足，别硬拼"略有差异"
-            crossTint = .gray
+            newCrossText = cross.text          // 可用源不足，别硬拼"略有差异"
+            newCrossTint = .gray
         }
 
-        detailText = clocks.map { "\($0.label)  \($0.briefLine)" }.joined(separator: "\n")
+        let newDetail = clocks.map { "\($0.label)  \($0.briefLine)" }.joined(separator: "\n")
+
+        if newLines != lines { lines = newLines }
+        if newSkewText != localSkewText { localSkewText = newSkewText }
+        if newSkewTint != localSkewTint { localSkewTint = newSkewTint }
+        if newCrossText != crossText { crossText = newCrossText }
+        if newCrossTint != crossTint { crossTint = newCrossTint }
+        if newDetail != detailText { detailText = newDetail }
     }
 }

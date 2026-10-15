@@ -175,7 +175,8 @@ final class ServerClock {
     }
 }
 
-struct ClockLine: Identifiable {
+/// Equatable 是给 ClockHub.tick() 做"值没变就不发布"用的（省掉每帧无意义的整树重绘）
+struct ClockLine: Identifiable, Equatable {
     let id: String
     let name: String
     let shortName: String

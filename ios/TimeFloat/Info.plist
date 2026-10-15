@@ -29,11 +29,8 @@
         <string>audio</string>
     </array>
 
-    <!-- ActivityKit 实时活动（灵动岛/锁屏倒计时）开关 -->
-    <key>NSSupportsLiveActivities</key>
-    <true/>
-    <key>NSSupportsLiveActivitiesFrequentUpdates</key>
-    <true/>
+    <!-- 已删除：NSSupportsLiveActivities / NSSupportsLiveActivitiesFrequentUpdates -->
+    <!-- 实时活动那套（灵动岛倒计时）已经砍掉，留着这两个 key 没意义 -->
 
     <key>UILaunchScreen</key>
     <dict/>

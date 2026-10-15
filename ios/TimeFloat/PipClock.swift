@@ -296,6 +296,15 @@ final class PipClockRenderer: NSObject, ObservableObject {
                                                 sampleTiming: &timing,
                                                 sampleBufferOut: &sampleBuffer)
         guard let sb = sampleBuffer else { return }
+        // ★ 标记「立即显示」：不设这个，displayLayer 会按 PTS 排队显示，
+        //   毫秒时钟会出现约一帧的滞后和偶发丢帧（浮窗上看就是"顿一下"）。
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: true),
+           CFArrayGetCount(attachments) > 0 {
+            let dict = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(dict,
+                                 Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                                 Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
         if displayLayer.status == .failed { displayLayer.flush() }
         displayLayer.enqueue(sb)
     }
