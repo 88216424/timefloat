@@ -361,7 +361,8 @@ extension PipClockRenderer: AVPictureInPictureControllerDelegate {
     }
 }
 
-/// 把 AVSampleBufferDisplayLayer 挂到 SwiftUI 里的宿主 UIView
+/// 把 AVSampleBufferDisplayLayer 挂到 SwiftUI 的宿主 UIView。
+/// 界面上不显示预览，它只是让渲染层待在视图树里（见 ContentView 里 0 透明度的用法）。
 final class SampleBufferHostView: UIView {
     let displayLayer: AVSampleBufferDisplayLayer
 
@@ -383,7 +384,7 @@ final class SampleBufferHostView: UIView {
     }
 }
 
-struct PipPreviewView: UIViewRepresentable {
+struct PipLayerHost: UIViewRepresentable {
     let renderer: PipClockRenderer
 
     func makeUIView(context: Context) -> SampleBufferHostView {
