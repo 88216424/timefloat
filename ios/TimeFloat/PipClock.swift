@@ -31,6 +31,14 @@ final class PipClockRenderer: NSObject, ObservableObject {
     private var pool: CVPixelBufferPool?
     private var frameIndex: Int64 = 0
 
+    /// KVO 观察 isPictureInPicturePossible：它变 true 的那一刻自动开画面，
+    /// 这样用户点一次就能起（以前要等系统异步置位，所以要点两次）
+    private var possibleObs: NSKeyValueObservation?
+    /// 用户已经点了"启动"、正在等系统就绪
+    private var wantStart = false
+    /// 帧计数：画中画没开时降频，只维持 App 内预览
+    private var tickCount = 0
+
     private let renderSize = CGSize(width: 660, height: 240)
     private let fps: Int32 = 15
 
@@ -51,12 +59,27 @@ final class PipClockRenderer: NSObject, ObservableObject {
             status = "此设备不支持画中画"
             return
         }
+
+        // 关键：先把第一帧画出来。系统要求 displayLayer 里已经有内容，
+        // isPictureInPicturePossible 才会变 true。
+        configureAudioSessionIfNeeded()
+        renderFrame()
+        armStartTimeout()
+
+        // 已经建过控制器：直接请求启动；此刻还没就绪就交给 KVO 补上
         if let p = pip {
-            p.startPictureInPicture()
+            wantStart = true
+            if p.isPictureInPicturePossible {
+                wantStart = false
+                p.startPictureInPicture()
+            } else {
+                status = "正在启动画中画…"
+            }
             return
         }
-        configureAudioSession()
+
         configureTimebase()
+        startFrameLoop()
 
         let source = AVPictureInPictureController.ContentSource(
             sampleBufferDisplayLayer: displayLayer,
@@ -66,31 +89,70 @@ final class PipClockRenderer: NSObject, ObservableObject {
         controller.delegate = self
         controller.canStartPictureInPictureAutomaticallyFromInline = true
         controller.requiresLinearPlayback = false
-        pip = controller
 
-        startFrameLoop()
-        status = "画中画已就绪"
+        // ★ 系统就绪的瞬间自动开，用户不用点第二次
+        possibleObs = controller.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] c, _ in
+            guard let self = self else { return }
+            if c.isPictureInPicturePossible && self.wantStart {
+                self.wantStart = false
+                c.startPictureInPicture()
+            }
+        }
+
+        pip = controller
+        wantStart = true
         if controller.isPictureInPicturePossible {
+            wantStart = false
             controller.startPictureInPicture()
+            status = "画中画已就绪"
         } else {
-            status = "切到别的 App 会自动浮起来（或稍后再点一次）"
+            status = "正在启动画中画…"
         }
     }
 
+    /// 关闭：如果正在画中画，交给 delegate 收尾（不要在这里 invalidate 定时器，
+    /// 否则画面会在关闭动画期间变黑）
     func stop() {
+        wantStart = false
+        if let p = pip, p.isPictureInPictureActive {
+            p.stopPictureInPicture()
+            status = "正在关闭…"
+        } else {
+            finishStop()
+        }
+    }
+
+    private func finishStop() {
         timer?.invalidate()
         timer = nil
-        if let p = pip, p.isPictureInPictureActive { p.stopPictureInPicture() }
+        possibleObs?.invalidate()
+        possibleObs = nil
         pip = nil
         isActive = false
         status = "已关闭"
     }
 
-    private func configureAudioSession() {
+    /// 兜底提示：正常情况 KVO 会在几百毫秒内把画中画拉起来，
+    /// 3 秒还没动就说明这次没成，直接告诉用户（免得又出现"点了没反应"）
+    private func armStartTimeout() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self = self else { return }
+            if self.wantStart && !self.isActive {
+                self.wantStart = false
+                self.status = "启动超时，请再点一次"
+            }
+        }
+    }
+
+    private var audioConfigured = false
+
+    private func configureAudioSessionIfNeeded() {
+        guard !audioConfigured else { return }
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .moviePlayback, options: [])
             try session.setActive(true)
+            audioConfigured = true
         } catch {
             status = "音频会话设置失败：\(error.localizedDescription)"
         }
@@ -121,6 +183,10 @@ final class PipClockRenderer: NSObject, ObservableObject {
 
     private func renderFrame() {
         frameIndex += 1
+        tickCount += 1
+        // 画中画开着时 15fps；没开时降频，只维持 App 内那个小预览（省电，不空转）
+        let pipActive = pip?.isPictureInPictureActive ?? false
+        if !pipActive && tickCount % 8 != 1 { return }
         guard let pixelBuffer = makePixelBuffer() else { return }
 
         CVPixelBufferLockBaseAddress(pixelBuffer, [])
@@ -269,17 +335,27 @@ extension PipClockRenderer: AVPictureInPictureSampleBufferPlaybackDelegate {
 extension PipClockRenderer: AVPictureInPictureControllerDelegate {
 
     func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
+        wantStart = false
         isActive = true
         status = "悬浮中（画中画窗口）"
+    }
+
+    /// ★ 苹果文档明确要求：这里必须尽快回调 completionHandler(true)，
+    /// 否则系统要等约 1 秒超时才会真正收起浮窗 —— 这就是"关闭要转圈一秒"的原因。
+    func pictureInPictureController(_ controller: AVPictureInPictureController,
+                                    restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        completionHandler(true)
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
         isActive = false
         status = "画中画已收起"
+        // 用户点浮窗上的 X 也会走到这里；定时器留着继续给 App 内预览降频重绘
     }
 
     func pictureInPictureController(_ controller: AVPictureInPictureController,
                                     failedToStartPictureInPictureWithError error: Error) {
+        wantStart = false
         isActive = false
         status = "画中画启动失败：\(error.localizedDescription)"
     }
