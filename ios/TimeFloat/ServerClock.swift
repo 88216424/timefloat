@@ -141,11 +141,11 @@ final class ServerClock {
 
     var statusColor: Color {
         if !synced {
-            return state == .syncing ? .yellow : .red
+            return state == .syncing ? Palette.warn : .red
         }
-        if isStale { return .yellow }
-        if !errorText.isEmpty { return .yellow }
-        return .green
+        if isStale { return Palette.warn }
+        if !errorText.isEmpty { return Palette.warn }
+        return Palette.ok
     }
 
     /// 主界面每路只显示这一行：**往返时间 + 多长时间前校准**

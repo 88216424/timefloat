@@ -1,5 +1,27 @@
 import SwiftUI
 
+/// 统一调色板 —— 与 Android 端 `res/values/colors.xml` 一一对应。
+/// 以前颜色散落在各个 View 里（同一种"次级文字"出现好几个不同白度），
+/// 界面看着发灰发脏；现在收敛成三级文字 + 一组语义色。
+enum Palette {
+    static let bgTop = Color(red: 0.06, green: 0.07, blue: 0.11)
+    static let bgBottom = Color(red: 0.02, green: 0.02, blue: 0.04)
+
+    static let accent = Color(red: 1.00, green: 0.42, blue: 0.00)   // #FF6A00
+    static let cardFill = Color.white.opacity(0.06)
+    static let cardStroke = Color.white.opacity(0.12)
+    static let divider = Color.white.opacity(0.10)
+    static let chipFill = Color.white.opacity(0.10)
+
+    static let textPrimary = Color.white
+    static let textSecondary = Color.white.opacity(0.70)            // ≈ #B3
+    static let textTertiary = Color.white.opacity(0.50)             // ≈ #80
+
+    static let ok = Color(red: 0.20, green: 0.78, blue: 0.35)
+    static let warn = Color(red: 1.00, green: 0.76, blue: 0.03)
+    static let danger = Color(red: 1.00, green: 0.55, blue: 0.52)
+}
+
 struct ContentView: View {
     @EnvironmentObject private var hub: ClockHub
     @StateObject private var pip = PipClockRenderer(clock: { ClockHub.shared.selected })
@@ -15,7 +37,12 @@ struct ContentView: View {
                 }
                 .padding(16)
             }
-            .background(Color(red: 0.04, green: 0.05, blue: 0.07).ignoresSafeArea())
+            .background(Palette.bgTop.ignoresSafeArea())
+            .background(
+                LinearGradient(colors: [Palette.bgTop, Palette.bgBottom],
+                               startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+            )
 
             FloatingClockOverlay(hub: hub)
         }
@@ -29,13 +56,18 @@ struct ContentView: View {
     // MARK: - 顶部
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("三源对时")
-                .font(.system(size: 26, weight: .bold))
-                .foregroundStyle(.white)
-            Text("三路服务器时间 · 毫秒级 · 抢购对时")
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.45))
+        HStack(spacing: 10) {
+            Image(systemName: "clock.badge.checkmark")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Palette.accent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("三源对时")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(Palette.textPrimary)
+                Text("三路服务器时间 · 毫秒级 · 抢购对时")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.textTertiary)
+            }
         }
     }
 
@@ -59,18 +91,22 @@ struct ContentView: View {
                         Circle().fill(line.color).frame(width: 8, height: 8)
                         Text(line.name)
                             .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(Palette.textSecondary)
                             .frame(width: 40, alignment: .leading)
                         Text(line.time)
                             .font(.system(size: 22, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(line.time.hasPrefix("--") ? .white.opacity(0.4) : .white)
-                        Spacer()
+                            .foregroundStyle(line.time.hasPrefix("--")
+                                             ? Palette.textTertiary
+                                             : Palette.textPrimary)
+                        Spacer(minLength: 6)
+                        // 固定最小宽度，让三个 chip 的右边缘对齐
                         Text(line.deltaText)
                             .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(Palette.textSecondary)
+                            .frame(minWidth: 40)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.white.opacity(0.1)))
+                            .background(Capsule().fill(Palette.chipFill))
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 9)
@@ -92,13 +128,18 @@ struct ContentView: View {
                  ? "画中画运行中，显示源已锁定"
                  : "点一下要盯的那路时间，启动悬浮窗后就显示它")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(Palette.textTertiary)
 
-            Divider().background(Color.white.opacity(0.12))
+            Rectangle()
+                .fill(Palette.divider)
+                .frame(height: 1)
 
+            // 每路一行：名称 + 往返时间 + 多久前校准
             Text(hub.detailText)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.6))
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Palette.textSecondary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .background(heroBackground)
@@ -110,7 +151,7 @@ struct ContentView: View {
                                           Color(red: 0.06, green: 0.07, blue: 0.10)],
                                  startPoint: .topLeading, endPoint: .bottomTrailing))
             .overlay(RoundedRectangle(cornerRadius: 20)
-                .stroke(Color.orange.opacity(0.35), lineWidth: 1))
+                .stroke(Palette.accent.opacity(0.28), lineWidth: 1))
     }
 
     // MARK: - 悬浮窗控制
@@ -120,51 +161,59 @@ struct ContentView: View {
             HStack {
                 Text("悬浮窗")
                     .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Palette.textPrimary)
                 Spacer()
                 Text("显示：" + hub.selected.label)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(hub.selected.accentColor)
                     .padding(.horizontal, 10).padding(.vertical, 3)
-                    .background(Capsule().fill(Color.white.opacity(0.1)))
+                    .background(Capsule().fill(Palette.chipFill))
             }
 
             Text(pip.status)
                 .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.65))
+                .foregroundStyle(Palette.textSecondary)
 
             Button(pip.isActive ? "收起画中画悬浮窗" : "启动画中画悬浮窗") {
                 if pip.isActive { pip.stop() } else { pip.start() }
             }
             .buttonStyle(.borderedProminent)
-            .tint(.orange)
+            .tint(Palette.accent)
 
             HStack(spacing: 10) {
                 Button("立即校时") { hub.refreshAll() }
                     .buttonStyle(.bordered)
+                    .tint(Palette.accent)
+
                 Spacer()
+
                 Text("预览")
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(Palette.textTertiary)
                 PipLayerHost(renderer: pip)
                     .frame(width: 132, height: 48)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .stroke(Palette.cardStroke, lineWidth: 1))
             }
+
+            Rectangle()
+                .fill(Palette.divider)
+                .frame(height: 1)
 
             Toggle("应用内悬浮卡片（仅本 App 前台可见，可拖动）", isOn: $inAppFloating)
                 .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Palette.textSecondary)
+                .tint(Palette.accent)
         }
         .padding(16)
         .background(card)
     }
 
-    // MARK: - 时间源
-
     private var card: some View {
         RoundedRectangle(cornerRadius: 18)
-            .fill(Color.white.opacity(0.06))
+            .fill(Palette.cardFill)
             .overlay(RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1))
+                .stroke(Palette.cardStroke, lineWidth: 1))
     }
 }
