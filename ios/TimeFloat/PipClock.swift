@@ -54,6 +54,15 @@ final class PipClockRenderer: NSObject, ObservableObject {
 
     // MARK: - 生命周期
 
+    /// App 内的预览：进前台就先把时间基和帧循环准备好，让那个小预览框立刻显示时间
+    /// （以前只在点「启动画中画」时才初始化，所以启动前预览是**全黑**的一块）
+    func preparePreview() {
+        guard Self.isSupported else { return }
+        if timebase == nil { configureTimebase() }
+        renderFrame(force: true)
+        if timer == nil { startFrameLoop() }
+    }
+
     func start() {
         guard Self.isSupported else {
             status = "此设备不支持画中画"
@@ -63,7 +72,10 @@ final class PipClockRenderer: NSObject, ObservableObject {
         // 关键：先把第一帧画出来。系统要求 displayLayer 里已经有内容，
         // isPictureInPicturePossible 才会变 true。
         configureAudioSessionIfNeeded()
-        renderFrame()
+        // ★ 时间基必须在第一帧之前建好：否则首帧 PTS 走的是 frameIndex 兜底值，
+        //   与后续帧（走 timebase）不同基准 → PTS 倒退 → 启动瞬间黑一下。
+        if timebase == nil { configureTimebase() }
+        renderFrame(force: true)
         armStartTimeout()
 
         // 已经建过控制器：直接请求启动；此刻还没就绪就交给 KVO 补上
@@ -78,7 +90,6 @@ final class PipClockRenderer: NSObject, ObservableObject {
             return
         }
 
-        configureTimebase()
         startFrameLoop()
 
         let source = AVPictureInPictureController.ContentSource(
@@ -181,12 +192,14 @@ final class PipClockRenderer: NSObject, ObservableObject {
 
     // MARK: - 逐帧绘制
 
-    private func renderFrame() {
+    private func renderFrame(force: Bool = false) {
         frameIndex += 1
         tickCount += 1
         // 画中画开着时 15fps；没开时降频，只维持 App 内那个小预览（省电，不空转）
         let pipActive = pip?.isPictureInPictureActive ?? false
-        if !pipActive && tickCount % 8 != 1 { return }
+        if !force && !pipActive && tickCount % 8 != 1 { return }
+        // 退到后台又没开画中画：预览根本看不见，别画了
+        if !pipActive && UIApplication.shared.applicationState == .background { return }
         guard let pixelBuffer = makePixelBuffer() else { return }
 
         CVPixelBufferLockBaseAddress(pixelBuffer, [])
@@ -279,6 +292,10 @@ final class PipClockRenderer: NSObject, ObservableObject {
     }
 
     private func enqueue(_ pixelBuffer: CVPixelBuffer) {
+        // ★ 消费端跟不上就直接丢掉这一帧（时钟只要最新一帧，丢帧天然是正确的），
+        //   否则 CMSampleBuffer 会在图层里堆积 → 内存上涨，flush 那一瞬间画面闪一下。
+        guard displayLayer.isReadyForMoreMediaData else { return }
+
         var format: CMFormatDescription?
         CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
                                                      imageBuffer: pixelBuffer,
@@ -335,7 +352,11 @@ extension PipClockRenderer: AVPictureInPictureSampleBufferPlaybackDelegate {
     }
 
     func pictureInPictureControllerShouldProhibitBackgroundAudioPlayback(_ controller: AVPictureInPictureController) -> Bool {
-        true
+        // ★ 必须是 false。本 App 在后台还能继续走，靠的就是 active 的 audio session +
+        //   UIBackgroundModes=[audio]；返回 true（= 禁止后台音频播放）有被系统判成
+        //   "播放已暂停"的风险 → 时间基 rate 归零 → 切到别的 App 后浮窗时间停在最后一帧。
+        //   我们本来就没有任何音频需要"禁止"，false 是零成本且方向安全的选择。
+        false
     }
 }
 

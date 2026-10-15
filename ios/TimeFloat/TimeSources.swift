@@ -46,9 +46,14 @@ enum Cfg {
     static let resyncPreciseMs: UInt64 = 60_000
     static let resyncCoarseMs: UInt64 = 90_000
     static let retryOnFailMs: UInt64 = 6_000
-    static let stuckMs: Int64 = 18_000
+    /// 判定"卡死"的阈值，必须**明显大于**一轮采样的最坏耗时，否则正常慢网络会被误判：
+    /// 最坏一轮 ≈ 淘宝 4 × 5s 超时 ≈ 20s（北京首轮还要叠 SNTP 2 台 × 2s）。
+    /// 取 30s 留出安全边界（Android 端同值）。
+    static let stuckMs: Int64 = 30_000
     static let uiTickInterval: TimeInterval = 0.05
     static let httpTimeout: TimeInterval = 5
+    /// SNTP 单次超时：蜂窝网封 UDP123 时靠它尽快失败去走 HTTP 兜底
+    static let sntpTimeout: TimeInterval = 2
 
     // 淘宝
     static let taobaoUrl = "https://acs.m.taobao.com/gw/mtop.common.getTimestamp/"
@@ -140,7 +145,7 @@ final class BeijingSource: TimeSource {
             for i in 0..<Cfg.sntpHostsPerSample {
                 let host = Cfg.sntpHosts[(hostCursor + i) % Cfg.sntpHosts.count]
                 do {
-                    let r = try await SntpClient.request(host: host)
+                    let r = try await SntpClient.request(host: host, timeout: Cfg.sntpTimeout)
                     hostCursor += 1
                     lastModeDateOnly = false
                     return RawSync(serverUtcMsAtRecv: r.serverUtcMsAtRecv,
@@ -187,7 +192,8 @@ final class TaobaoSource: TimeSource {
 
     func fetch() async throws -> RawSync {
         let url = Cfg.taobaoUrl + "?_=\(Int(Date().timeIntervalSince1970 * 1000))"
-        let r = try await Http.get(url, headers: ["Referer": "https://m.taobao.com/"])
+        let r = try await Http.get(url, timeout: Cfg.httpTimeout,
+                                   headers: ["Referer": "https://m.taobao.com/"])
         guard r.status == 200 else {
             throw NSError(domain: "TimeFloat", code: 11,
                           userInfo: [NSLocalizedDescriptionKey: "淘宝 HTTP \(r.status)"])

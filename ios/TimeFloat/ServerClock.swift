@@ -61,7 +61,9 @@ final class ServerClock {
         return Int64((Double(mono) + off).rounded()) + manualTrimMs
     }
 
-    func nowUtcMs() -> Int64 { utcMsOrNil() ?? Int64(Date().timeIntervalSince1970 * 1000) }
+    /// 便利方法：未校时返回本地墙钟。**故意设为 private** ——
+    /// "绝不拿墙钟冒充服务器时间"是硬规矩，不能让它在别处被误用到显示路径上。
+    private func nowUtcMs() -> Int64 { utcMsOrNil() ?? Int64(Date().timeIntervalSince1970 * 1000) }
 
     /// 本机墙钟相对**这一路服务器时钟**的偏差（毫秒）。
     /// 正数 = 本机比该服务器快，负数 = 本机比该服务器慢。

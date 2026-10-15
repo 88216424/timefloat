@@ -1,9 +1,18 @@
 import Foundation
 
 /// 单调时钟。抢购场景绝不能用墙上时钟做计时基准：系统后台校时一跳就是几百毫秒。
-/// DispatchTime 基于 mach 时钟，只单调递增。
+///
+/// ⚠️ 必须用 CLOCK_MONOTONIC，**绝对不能用 `DispatchTime.now().uptimeNanoseconds`**：
+///    后者的官方语义是「系统清醒时间的累计」（Apple 文档原文：*excluding any time the
+///    system spent asleep*）。手机锁屏睡 5 分钟它就少走 5 分钟，于是
+///    `服务器时间 = monoMs() + offset`（ServerClock）整体静默慢 5 分钟 ——
+///    而且**所有守卫都发现不了**：synced 还是 true，jump guard 比的又是两个同基准的
+///    offset，差值极小。锁屏后拿起手机看一眼就下单，正是本 App 的核心场景。
+///    CLOCK_MONOTONIC 在 Darwin 上睡眠期间照常前进，与 Android 的
+///    SystemClock.elapsedRealtime() 语义一致（两端不会各走各的）。
+///    重启检测不受影响：它同样在重启后归零。
 @inline(__always) func monoMs() -> Int64 {
-    Int64(DispatchTime.now().uptimeNanoseconds / 1_000_000)
+    Int64(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000_000)
 }
 
 enum Fmt {

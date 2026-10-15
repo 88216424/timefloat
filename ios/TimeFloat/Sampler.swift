@@ -26,14 +26,18 @@ enum Sampler {
         var timedOut = false
 
         for i in 0..<rounds {
+            // 开新一轮之前先看预算：上一轮要是把预算吃完了，这轮就别再开，
+            // 否则整轮会拖到 30 秒以上，撞上看门狗的"卡死"判定 →
+            // 界面先闪一下"校准失败"、过一会儿又自己好了
+            if i > 0 {
+                if monoMs() > deadline { timedOut = true; break }
+                try? await Task.sleep(nanoseconds: Cfg.sampleGapMs * 1_000_000)
+            }
             do {
                 raws.append(try await source.fetch())
             } catch {
                 lastError = error
             }
-            if i == rounds - 1 { break }
-            if monoMs() > deadline { timedOut = true; break }
-            try? await Task.sleep(nanoseconds: Cfg.sampleGapMs * 1_000_000)
         }
 
         let took = monoMs() - start

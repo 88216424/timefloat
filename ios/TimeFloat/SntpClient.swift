@@ -16,7 +16,7 @@ enum SntpClient {
 
     enum SntpError: Error { case timeout, badPacket, connect(String) }
 
-    static func request(host: String, timeout: TimeInterval = 5) async throws -> Reply {
+    static func request(host: String, timeout: TimeInterval = Cfg.sntpTimeout) async throws -> Reply {
         var packet = [UInt8](repeating: 0, count: 48)
         packet[0] = 0x1B                      // LI=0, VN=3, Mode=3 (client)
 

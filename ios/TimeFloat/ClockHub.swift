@@ -43,9 +43,14 @@ final class ClockHub: ObservableObject {
     func start() {
         guard !running else { return }
         running = true
-        timer = Timer.scheduledTimer(withTimeInterval: Cfg.uiTickInterval, repeats: true) { [weak self] _ in
+        // ★ 必须加进 .common 模式：Timer.scheduledTimer 只注册 .default，
+        //   而用户拖动列表/滚动时主 run loop 会切到 UITracking 模式 →
+        //   tick() 停摆 → App 内三行时间和浮卡全都"冻住"，松手才恢复。
+        let t = Timer(timeInterval: Cfg.uiTickInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
         for c in clocks {
             loops.append(Task { [weak self] in await self?.syncLoop(c) })
         }

@@ -19,7 +19,11 @@ struct ContentView: View {
 
             FloatingClockOverlay(hub: hub)
         }
-        .onAppear { hub.start() }
+        .onAppear {
+            hub.start()
+            // 进前台就把渲染层准备好：否则那个 132×48 的预览框在点「启动画中画」之前是全黑的
+            pip.preparePreview()
+        }
     }
 
     // MARK: - 顶部

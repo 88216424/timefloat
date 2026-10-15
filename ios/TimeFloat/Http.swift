@@ -26,7 +26,7 @@ enum Http {
     }()
 
     static func get(_ url: String,
-                    timeout: TimeInterval = 8,
+                    timeout: TimeInterval = Cfg.httpTimeout,
                     headers: [String: String] = [:]) async throws -> HttpResult {
         guard let u = URL(string: url) else { throw NSError(domain: "TimeFloat", code: -1) }
         var req = URLRequest(url: u)
