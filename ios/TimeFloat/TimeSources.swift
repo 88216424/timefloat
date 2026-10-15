@@ -130,9 +130,9 @@ final class BeijingSource: TimeSource {
     private var lastModeDateOnly = false
     private var lastHalfWidthMs: Int64 = 30
 
-    override var preferredSamples: Int { monoMs() < ntpDownUntilMono ? 1 : Cfg.samplesPerSync }
-    override var selfAggregated: Bool { monoMs() < ntpDownUntilMono }
-    override var extraUncertaintyMs: Int64 { lastModeDateOnly ? max(lastHalfWidthMs + 8, 10) : 3 }
+    var preferredSamples: Int { monoMs() < ntpDownUntilMono ? 1 : Cfg.samplesPerSync }
+    var selfAggregated: Bool { monoMs() < ntpDownUntilMono }
+    var extraUncertaintyMs: Int64 { lastModeDateOnly ? max(lastHalfWidthMs + 8, 10) : 3 }
 
     func fetch() async throws -> RawSync {
         // 1) SNTP
@@ -183,7 +183,7 @@ final class BeijingSource: TimeSource {
 final class TaobaoSource: TimeSource {
     let id = "taobao"
     let label = "淘宝"
-    override var extraUncertaintyMs: Int64 { 5 }
+    var extraUncertaintyMs: Int64 { 5 }
 
     func fetch() async throws -> RawSync {
         let url = Cfg.taobaoUrl + "?_=\(Int(Date().timeIntervalSince1970 * 1000))"
@@ -223,14 +223,14 @@ final class TaobaoSource: TimeSource {
 final class JdSource: TimeSource {
     let id = "jd"
     let label = "京东"
-    override var preferredSamples: Int { 1 }
-    override var selfAggregated: Bool { true }
+    var preferredSamples: Int { 1 }
+    var selfAggregated: Bool { true }
 
     private let intersector = DateIntersector()
     private var lastHalfWidthMs: Int64 = 30
     private var goodUrl: String?
 
-    override var extraUncertaintyMs: Int64 { max(lastHalfWidthMs + 8, 10) }
+    var extraUncertaintyMs: Int64 { max(lastHalfWidthMs + 8, 10) }
 
     func fetch() async throws -> RawSync {
         var urls = Cfg.jdProbeUrls
