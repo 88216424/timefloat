@@ -139,12 +139,6 @@ struct ContentView: View {
                 Button("立即校时") { hub.refreshAll() }
                     .buttonStyle(.bordered)
                 Spacer()
-                Text("预览")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.5))
-                PipPreviewView(renderer: pip)
-                    .frame(width: 132, height: 48)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
             Toggle("应用内悬浮卡片（仅本 App 前台可见，可拖动）", isOn: $inAppFloating)
@@ -153,6 +147,15 @@ struct ContentView: View {
         }
         .padding(16)
         .background(card)
+        // 画中画的渲染层（AVSampleBufferDisplayLayer）需要有个宿主视图待在视图树里。
+        // 这里放成 0 透明度的背景层：界面上看不见、也不占布局，但浮窗照常工作。
+        .background(
+            PipLayerHost(renderer: pip)
+                .frame(width: 160, height: 58)
+                .opacity(0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        )
     }
 
     // MARK: - 时间源
