@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 /// 三路时钟总调度。主界面和画中画浮窗读同一份数据，显示永远一致。
 ///
@@ -152,6 +153,11 @@ final class ClockHub: ObservableObject {
     // MARK: - 每秒 20 次的界面刷新
 
     private func tick() {
+        // 退到后台就不用刷 App 内界面了 —— 浮窗是 PipClock 自己按帧画的，不依赖这个 tick。
+        // 但**校时循环照常跑**：后台正是"用别的 App 时浮窗要准"的主场景。
+        // 这样既省掉后台 20fps 的字符串格式化，又不会让浮窗数据变旧。
+        if UIApplication.shared.applicationState == .background { return }
+
         // 注意变量名：不能叫 bj/tb/jd，否则会把同名的时钟属性遮住（Swift 会报类型不匹配）
         let bjMs = beijing.utcMsOrNil()
         let tbMs = taobao.utcMsOrNil()

@@ -29,6 +29,11 @@ enum DateProbe {
         req.timeoutInterval = timeout
         req.setValue(Http.ua, forHTTPHeaderField: "User-Agent")
         req.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        // ★ 只要 Date 头，body 一个字节都不要。
+        //   URLSession.bytes(for:) 返回的 AsyncBytes 我们从不消费也从不取消，
+        //   不加 Range 的话每轮会把百度/腾讯首页（各几百 KB）在后台整个拖下来 ——
+        //   移动网络下是实打实的白耗流量。Range 响应只有 1 字节，Date 头照样有效。
+        req.setValue("bytes=0-0", forHTTPHeaderField: "Range")
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
 
         let t0 = monoMs()

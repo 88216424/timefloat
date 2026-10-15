@@ -95,9 +95,12 @@ private func probeBurst(urls: [String],
                         gapMs: UInt64,
                         budgetMs: Int64,
                         intersector: DateIntersector,
-                        headers: [String: String] = [:]) async -> (url: String?, accepted: Int) {
+                        headers: [String: String] = [:]) async -> (url: String?, accepted: Int, minRttMs: Int64) {
     let deadline = monoMs() + budgetMs
     var accepted = 0
+    /// **本轮**最小 rtt：界面上"往返 Nms"必须反映当前网络，
+    /// 不能用交集器里存了十分钟的历史最小值（那会显得比实际更乐观）
+    var minRtt: Int64 = -1
     var good: String?
     var outOfTime = false
     for url in urls {
@@ -111,16 +114,19 @@ private func probeBurst(urls: [String],
                 intersector.add(s, monoNowMs: monoMs())
                 ok += 1
                 accepted += 1
+                if minRtt < 0 || s.rttMs < minRtt { minRtt = s.rttMs }
             }
             try? await Task.sleep(nanoseconds: gapMs * 1_000_000)
         }
-        if ok > 0 && good == nil {
-            good = url
-            if intersector.estimate() != nil { break }
+        if ok > 0 {
+            // ★ 一轮只用一台主机：京东两台走不同边缘（jfe / nginx）、北京兜底是百度/腾讯，
+            //   钟能差几十毫秒，混进同一个交集器会夹出"更紧但带系统偏差"的值。
+            if good == nil { good = url }
+            break
         }
         if outOfTime { break }
     }
-    return (good, accepted)
+    return (good, accepted, minRtt)
 }
 
 // MARK: - 北京时间
@@ -131,6 +137,8 @@ final class BeijingSource: TimeSource {
 
     private var hostCursor = 0
     private let intersector = DateIntersector()
+    /// 上一轮实际用的探针 URL：用来检测"换了主机"，换了就要清空交集器
+    private var lastProbeUrl: String?
     private var ntpDownUntilMono: Int64 = 0
     private var lastModeDateOnly = false
     private var lastHalfWidthMs: Int64 = 30
@@ -162,12 +170,31 @@ final class BeijingSource: TimeSource {
         }
 
         // 2) HTTP Date 头秒边界交集兜底
-        intersector.reset()
+        // ★ 这里**不能** reset：交集器要跨轮累积才能把区间越收越紧
+        //   （设备重启时 DateIntersector 自己会检测单调钟倒退并清空）。
+        //   以前每轮都 reset，导致兜底只用当轮 6 个样本，区间偏宽、失败率也高。
         let res = await probeBurst(urls: Cfg.bjDateProbeUrls,
                                    samplesPerUrl: Cfg.bjDateProbeSamples,
                                    gapMs: Cfg.jdProbeGapMs,
                                    budgetMs: Cfg.bjBurstBudgetMs,
-                                   intersector: intersector)
+                                   intersector: intersector,
+                                   // 百度/腾讯首页是几百 KB：加 Range 只取首字节，Date 头照样在，流量省 99%
+                                   headers: ["Range": "bytes=0-0"])
+        // ★ 本轮一条新样本都没拿到时，绝不能用交集器里的旧约束糊弄成"刚校准"：
+        //   旧约束照样能算出 estimate，界面会显示绿色"往返 26ms · 0s前校准"，
+        //   而 isStale() 永远不会触发（这是精度最后一道兜底）。
+        guard res.accepted > 0 else {
+            throw NSError(domain: "TimeFloat", code: 11,
+                          userInfo: [NSLocalizedDescriptionKey: "NTP 不通，本轮 HTTP Date 兜底 0 个有效样本"])
+        }
+        if let u = res.url, let last = lastProbeUrl, u != last {
+            // 换了主机（百度 ↔ 腾讯）→ 两家约束不能混着求交：清空并作废本轮
+            intersector.reset()
+            lastProbeUrl = u
+            throw NSError(domain: "TimeFloat", code: 12,
+                          userInfo: [NSLocalizedDescriptionKey: "Date 主机切换（\(hostOf(last)) → \(hostOf(u))），本轮作废"])
+        }
+        if let u = res.url { lastProbeUrl = u }
         guard let est = intersector.estimate() else {
             throw NSError(domain: "TimeFloat", code: 10,
                           userInfo: [NSLocalizedDescriptionKey: "NTP 不通，HTTP Date 兜底样本不足（\(res.accepted) 次）"])
@@ -177,7 +204,7 @@ final class BeijingSource: TimeSource {
         let mono = monoMs()
         return RawSync(serverUtcMsAtRecv: mono + est.offsetMs,
                        monoMsAtRecv: mono,
-                       rttMs: max(intersector.lastMinRttMs, 1),
+                       rttMs: max(res.minRttMs, 1),
                        strategy: "HTTP Date 秒边界交集 \(hostOf(res.url ?? ""))（\(est.samples) 样本 · ±\(est.halfWidthMs)ms）",
                        preciseMs: true)
     }
@@ -235,6 +262,8 @@ final class JdSource: TimeSource {
     private let intersector = DateIntersector()
     private var lastHalfWidthMs: Int64 = 30
     private var goodUrl: String?
+    /// 上一轮实际用的探针 URL（换主机时要清空交集器）
+    private var lastProbeUrl: String?
 
     var extraUncertaintyMs: Int64 { max(lastHalfWidthMs + 8, 10) }
 
@@ -250,6 +279,20 @@ final class JdSource: TimeSource {
                                    headers: ["Referer": "https://www.jd.com/"])
         if let g = res.url { goodUrl = g }
 
+        // ★ 本轮零新样本时不许拿旧约束冒充"刚校准"（同北京兜底那条）
+        guard res.accepted > 0 else {
+            throw NSError(domain: "TimeFloat", code: 21,
+                          userInfo: [NSLocalizedDescriptionKey: "京东本轮 0 个有效 Date 样本"])
+        }
+        if let u = res.url, let last = lastProbeUrl, u != last {
+            // 换了主机（jfe ↔ nginx）→ 清空交集器并作废本轮，别把两家的约束混着求交
+            intersector.reset()
+            lastProbeUrl = u
+            throw NSError(domain: "TimeFloat", code: 22,
+                          userInfo: [NSLocalizedDescriptionKey: "京东 Date 主机切换（\(hostOf(last)) → \(hostOf(u))），本轮作废"])
+        }
+        if let u = res.url { lastProbeUrl = u }
+
         guard let est = intersector.estimate() else {
             throw NSError(domain: "TimeFloat", code: 20,
                           userInfo: [NSLocalizedDescriptionKey: "京东 Date 头样本不足（本轮有效 \(res.accepted) 次）"])
@@ -258,7 +301,7 @@ final class JdSource: TimeSource {
         let mono = monoMs()
         return RawSync(serverUtcMsAtRecv: mono + est.offsetMs,
                        monoMsAtRecv: mono,
-                       rttMs: max(intersector.lastMinRttMs, 1),
+                       rttMs: max(res.minRttMs, 1),
                        strategy: "Date 秒边界交集 \(hostOf(res.url ?? ""))（\(est.samples) 样本 · ±\(est.halfWidthMs)ms）",
                        preciseMs: true)
     }

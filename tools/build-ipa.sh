@@ -59,20 +59,8 @@ xcodebuild \
 if [ -n "$TEAM" ]; then
   echo "==> 4/5 用证书导出已签名 .ipa（TEAM=$TEAM）"
   EXPORT_PLIST="$BUILD_DIR/ExportOptions.plist"
-  cat > "$EXPORT_PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>method</key><string>development</string>
-    <key>teamID</key><string>$TEAM</string>
-    <key>signingStyle</key><string>automatic</string>
-    <key>compileBitcode</key><false/>
-    <key>stripSwiftSymbols</key><true/>
-    <key>destination</key><string>export</string>
-</dict>
-</plist>
-PLIST
+  # 直接用仓库里那份 ios/ExportOptions.plist（单一来源），只把 teamID 占位符换成你的
+  sed "s/REPLACE_WITH_YOUR_TEAM_ID/$TEAM/" "$IOS_DIR/ExportOptions.plist" > "$EXPORT_PLIST"
   rm -rf "$BUILD_DIR/export"
   xcodebuild -exportArchive \
     -archivePath "$ARCHIVE" \

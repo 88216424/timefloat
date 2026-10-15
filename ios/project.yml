@@ -11,6 +11,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
+    # 显式写实：Swift 5 语言模式下默认就是 minimal（隐式约定容易等到升 Swift 6 才炸）
+    SWIFT_STRICT_CONCURRENCY: minimal
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""
     ENABLE_USER_SCRIPT_SANDBOXING: NO
