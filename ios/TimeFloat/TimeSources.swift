@@ -1,0 +1,259 @@
+import Foundation
+
+/// 一次原始采样结果
+struct RawSync {
+    let serverUtcMsAtRecv: Int64
+    let monoMsAtRecv: Int64
+    let rttMs: Int64
+    let strategy: String
+    let preciseMs: Bool
+    var offsetMs: Int64 { serverUtcMsAtRecv - monoMsAtRecv }
+}
+
+protocol TimeSource {
+    var id: String { get }
+    var label: String { get }
+    var preferredSamples: Int { get }
+    var extraUncertaintyMs: Int64 { get }
+    /// 源内部已经做了多次采样聚合（Date 头秒边界交集），Sampler 不该再叠加 rtt/2
+    var selfAggregated: Bool { get }
+    func fetch() async throws -> RawSync
+}
+
+extension TimeSource {
+    var preferredSamples: Int { Cfg.samplesPerSync }
+    var extraUncertaintyMs: Int64 { 0 }
+    var selfAggregated: Bool { false }
+}
+
+enum Cfg {
+    // 采样
+    static let samplesPerSync = 4
+    static let sampleGapMs: UInt64 = 90
+    static let syncBudgetMs: Int64 = 12_000
+    static let minRttWindowRatio = 0.4
+    static let outlierMs: Double = 40
+
+    // 正确性保护
+    static let jumpToleranceMs: Double = 1_000
+    static let jumpAgreeMs: Double = 300
+    static let jumpConfirmRounds = 2
+    static let crossOkMs: Int64 = 50
+    static let crossWarnMs: Int64 = 200
+    static let staleMs: Int64 = 150_000
+
+    // 周期
+    static let resyncPreciseMs: UInt64 = 60_000
+    static let resyncCoarseMs: UInt64 = 90_000
+    static let retryOnFailMs: UInt64 = 6_000
+    static let stuckMs: Int64 = 18_000
+    static let uiTickInterval: TimeInterval = 0.05
+    static let httpTimeout: TimeInterval = 5
+
+    // 淘宝
+    static let taobaoUrl = "https://acs.m.taobao.com/gw/mtop.common.getTimestamp/"
+
+    // 京东：Date 头 + 秒边界交集（api.m.jd.com 响应只有几十字节，实测 rtt 26ms）
+    static let jdProbeUrls = ["https://api.m.jd.com/"]
+    static let jdProbeSamples = 12
+    static let jdProbeGapMs: UInt64 = 45
+
+    // 北京
+    static let sntpHosts = ["ntp.aliyun.com", "ntp1.aliyun.com", "ntp2.aliyun.com", "cn.pool.ntp.org"]
+    static let sntpHostsPerSample = 2
+    static let bjNtpCooldownMs: Int64 = 300_000
+    static let bjDateProbeUrls = ["https://www.baidu.com/", "https://www.qq.com/"]
+    static let bjDateProbeSamples = 6
+
+    /// rtt 超过这个值的样本直接丢
+    static let dateProbeMaxRttMs: Int64 = 300
+    /// 单次探针超时：必须短，网络一卡整轮取样会被拖死
+    static let dateProbeTimeout: TimeInterval = 3
+    /// 一整轮取样的硬预算：到点就用手上的样本收工
+    static let jdBurstBudgetMs: Int64 = 4_000
+    static let bjBurstBudgetMs: Int64 = 4_500
+    /// 调度自愈阈值：超过这么久连"开始校时"都没有过，就强行补一次
+    static let selfHealMs: Int64 = 90_000
+}
+
+private func hostOf(_ url: String) -> String {
+    url.replacingOccurrences(of: "https://", with: "")
+        .replacingOccurrences(of: "http://", with: "")
+        .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+}
+
+/// 抓一组 Date 头样本并累计进交集器。
+/// ★ 整轮有硬预算 budgetMs：到点就用手上的样本收工，绝不恋战
+///   （以前没预算，单次超时 5s × 12 次能把一轮拖到一分钟，把校时循环拖死）
+private func probeBurst(urls: [String],
+                        samplesPerUrl: Int,
+                        gapMs: UInt64,
+                        budgetMs: Int64,
+                        intersector: DateIntersector,
+                        headers: [String: String] = [:]) async -> (url: String?, accepted: Int) {
+    let deadline = monoMs() + budgetMs
+    var accepted = 0
+    var good: String?
+    var outOfTime = false
+    for url in urls {
+        var ok = 0
+        for _ in 0..<samplesPerUrl {
+            if monoMs() > deadline {
+                outOfTime = true
+                break
+            }
+            if let s = await DateProbe.probe(url, headers: headers), s.rttMs <= Cfg.dateProbeMaxRttMs {
+                intersector.add(s, monoNowMs: monoMs())
+                ok += 1
+                accepted += 1
+            }
+            try? await Task.sleep(nanoseconds: gapMs * 1_000_000)
+        }
+        if ok > 0 && good == nil {
+            good = url
+            if intersector.estimate() != nil { break }
+        }
+        if outOfTime { break }
+    }
+    return (good, accepted)
+}
+
+// MARK: - 北京时间
+
+final class BeijingSource: TimeSource {
+    let id = "bj"
+    let label = "北京"
+
+    private var hostCursor = 0
+    private let intersector = DateIntersector()
+    private var ntpDownUntilMono: Int64 = 0
+    private var lastModeDateOnly = false
+    private var lastHalfWidthMs: Int64 = 30
+
+    override var preferredSamples: Int { monoMs() < ntpDownUntilMono ? 1 : Cfg.samplesPerSync }
+    override var selfAggregated: Bool { monoMs() < ntpDownUntilMono }
+    override var extraUncertaintyMs: Int64 { lastModeDateOnly ? max(lastHalfWidthMs + 8, 10) : 3 }
+
+    func fetch() async throws -> RawSync {
+        // 1) SNTP
+        if monoMs() >= ntpDownUntilMono {
+            for i in 0..<Cfg.sntpHostsPerSample {
+                let host = Cfg.sntpHosts[(hostCursor + i) % Cfg.sntpHosts.count]
+                do {
+                    let r = try await SntpClient.request(host: host)
+                    hostCursor += 1
+                    lastModeDateOnly = false
+                    return RawSync(serverUtcMsAtRecv: r.serverUtcMsAtRecv,
+                                   monoMsAtRecv: monoMs(),
+                                   rttMs: r.rttMs,
+                                   strategy: "SNTP \(host) (stratum \(r.stratum))",
+                                   preciseMs: true)
+                } catch {
+                    // 继续试下一台
+                }
+            }
+            hostCursor += 1
+            ntpDownUntilMono = monoMs() + Cfg.bjNtpCooldownMs
+        }
+
+        // 2) HTTP Date 头秒边界交集兜底
+        intersector.reset()
+        let res = await probeBurst(urls: Cfg.bjDateProbeUrls,
+                                   samplesPerUrl: Cfg.bjDateProbeSamples,
+                                   gapMs: Cfg.jdProbeGapMs,
+                                   budgetMs: Cfg.bjBurstBudgetMs,
+                                   intersector: intersector)
+        guard let est = intersector.estimate() else {
+            throw NSError(domain: "TimeFloat", code: 10,
+                          userInfo: [NSLocalizedDescriptionKey: "NTP 不通，HTTP Date 兜底样本不足（\(res.accepted) 次）"])
+        }
+        lastModeDateOnly = true
+        lastHalfWidthMs = max(est.halfWidthMs, 8)
+        let mono = monoMs()
+        return RawSync(serverUtcMsAtRecv: mono + est.offsetMs,
+                       monoMsAtRecv: mono,
+                       rttMs: max(intersector.lastMinRttMs, 1),
+                       strategy: "HTTP Date 秒边界交集 \(hostOf(res.url ?? ""))（\(est.samples) 样本 · ±\(est.halfWidthMs)ms）",
+                       preciseMs: true)
+    }
+}
+
+// MARK: - 淘宝服务器时间
+
+final class TaobaoSource: TimeSource {
+    let id = "taobao"
+    let label = "淘宝"
+    override var extraUncertaintyMs: Int64 { 5 }
+
+    func fetch() async throws -> RawSync {
+        let url = Cfg.taobaoUrl + "?_=\(Int(Date().timeIntervalSince1970 * 1000))"
+        let r = try await Http.get(url, headers: ["Referer": "https://m.taobao.com/"])
+        guard r.status == 200 else {
+            throw NSError(domain: "TimeFloat", code: 11,
+                          userInfo: [NSLocalizedDescriptionKey: "淘宝 HTTP \(r.status)"])
+        }
+        let pattern = "\"t\"\\s*:\\s*\"?(\\d{10,13})\"?"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let m = regex.firstMatch(in: r.body, range: NSRange(r.body.startIndex..., in: r.body)),
+              let range = Range(m.range(at: 1), in: r.body),
+              var t = Int64(r.body[range]) else {
+            throw NSError(domain: "TimeFloat", code: 12,
+                          userInfo: [NSLocalizedDescriptionKey: "淘宝响应里没有 t 字段"])
+        }
+        if t < 1_000_000_000_000 { t *= 1000 }
+        let wallNow = Int64(Date().timeIntervalSince1970 * 1000)
+        guard abs(t - wallNow) < 86_400_000 else {
+            throw NSError(domain: "TimeFloat", code: 13,
+                          userInfo: [NSLocalizedDescriptionKey: "淘宝返回的时间戳不合理"])
+        }
+        return RawSync(serverUtcMsAtRecv: t + r.rttMs / 2,
+                       monoMsAtRecv: r.monoAtRecvMs,
+                       rttMs: r.rttMs,
+                       strategy: "mtop.common.getTimestamp",
+                       preciseMs: true)
+    }
+}
+
+// MARK: - 京东服务器时间
+//
+// 商品页那个 presellInfo.serverTime 字段时有时无（页面从 284KB 缩到 3KB 时直接消失），
+// 一旦缺失就会退到秒精度的 Date 头 → 误差 0~1000ms 随机跳。
+// 现在统一走：api.m.jd.com 的 Date 头 + 秒边界交集，稳定且几十毫秒级。
+
+final class JdSource: TimeSource {
+    let id = "jd"
+    let label = "京东"
+    override var preferredSamples: Int { 1 }
+    override var selfAggregated: Bool { true }
+
+    private let intersector = DateIntersector()
+    private var lastHalfWidthMs: Int64 = 30
+    private var goodUrl: String?
+
+    override var extraUncertaintyMs: Int64 { max(lastHalfWidthMs + 8, 10) }
+
+    func fetch() async throws -> RawSync {
+        var urls = Cfg.jdProbeUrls
+        if let g = goodUrl, !urls.contains(g) { urls.insert(g, at: 0) }
+
+        let res = await probeBurst(urls: urls,
+                                   samplesPerUrl: Cfg.jdProbeSamples,
+                                   gapMs: Cfg.jdProbeGapMs,
+                                   budgetMs: Cfg.jdBurstBudgetMs,
+                                   intersector: intersector,
+                                   headers: ["Referer": "https://www.jd.com/"])
+        if let g = res.url { goodUrl = g }
+
+        guard let est = intersector.estimate() else {
+            throw NSError(domain: "TimeFloat", code: 20,
+                          userInfo: [NSLocalizedDescriptionKey: "京东 Date 头样本不足（本轮有效 \(res.accepted) 次）"])
+        }
+        lastHalfWidthMs = max(est.halfWidthMs, 8)
+        let mono = monoMs()
+        return RawSync(serverUtcMsAtRecv: mono + est.offsetMs,
+                       monoMsAtRecv: mono,
+                       rttMs: max(intersector.lastMinRttMs, 1),
+                       strategy: "Date 秒边界交集 \(hostOf(res.url ?? ""))（\(est.samples) 样本 · ±\(est.halfWidthMs)ms）",
+                       preciseMs: true)
+    }
+}

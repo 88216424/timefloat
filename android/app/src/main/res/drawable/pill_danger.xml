@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 危险按钮：红调胶囊 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="100dp" />
+    <solid android:color="#26FF453A" />
+    <stroke
+        android:width="1dp"
+        android:color="#59FF453A" />
+</shape>

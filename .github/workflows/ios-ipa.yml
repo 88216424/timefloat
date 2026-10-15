@@ -1,0 +1,73 @@
+name: build-ios-ipa
+
+# 没有 Mac 就用这条：GitHub 的 macOS runner 免费帮你把未签名 .ipa 编出来，
+# 下下来用 AltStore / Sideloadly + 你自己的 Apple ID 签装。
+#
+# 用法：把整个 timefloat 目录推到 GitHub 仓库 → Actions 页 → Run workflow → 下载 Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_id:
+        description: "Bundle ID（免费 Apple ID 签名时建议改成你自己的，避免和已装 app 撞）"
+        required: false
+        default: "com.yesha.timefloat"
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-ipa.yml"
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      BUNDLE_ID: ${{ github.event.inputs.bundle_id || 'com.yesha.timefloat' }}
+
+    steps:
+      - name: 取代码
+        uses: actions/checkout@v4
+
+      - name: 看 Xcode 版本
+        run: xcodebuild -version
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: |
+          cd ios
+          xcodegen generate
+          ls -la
+
+      - name: 归档（未签名，无需证书）
+        run: |
+          cd ios
+          xcodebuild \
+            -project TimeFloat.xcodeproj \
+            -scheme TimeFloat \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/TimeFloat.xcarchive \
+            PRODUCT_BUNDLE_IDENTIFIER="$BUNDLE_ID" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: 打成未签名 .ipa（Payload 结构）
+        run: |
+          set -e
+          APP="ios/build/TimeFloat.xcarchive/Products/Applications/TimeFloat.app"
+          test -d "$APP" || { echo "没找到 TimeFloat.app"; find ios/build -maxdepth 5 -name '*.app'; exit 1; }
+          rm -rf ios/build/Payload && mkdir -p ios/build/Payload
+          cp -R "$APP" ios/build/Payload/
+          cd ios/build && zip -qr TimeFloat-unsigned.ipa Payload
+          ls -lh TimeFloat-unsigned.ipa
+          echo "Bundle ID: $BUNDLE_ID"
+
+      - name: 上传 ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: TimeFloat-unsigned-ipa
+          path: ios/build/TimeFloat-unsigned.ipa
+          if-no-files-found: error

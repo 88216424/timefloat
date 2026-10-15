@@ -1,0 +1,25 @@
+# ---- Android 构建产物 ----
+android/build/
+android/app/build/
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/captures/
+
+# ---- iOS 构建产物 ----
+ios/build/
+ios/TimeFloat.xcodeproj/
+ios/*.xcworkspace/
+ios/DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# ---- 编辑器 / 系统 ----
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ---- 交付物（体积大，不进仓库）----
+dist/
