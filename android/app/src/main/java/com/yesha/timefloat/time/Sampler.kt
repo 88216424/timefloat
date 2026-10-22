@@ -42,19 +42,22 @@ object Sampler {
         var timedOut = false
 
         for (i in 0 until rounds) {
+            // 开新一轮之前先看预算：上一轮要是把预算吃完了，这轮就别再开，
+            // 否则整轮会拖到十几秒以上（撞上看门狗的卡死判定，白跑一遍）
+            if (i > 0) {
+                if (System.nanoTime() > deadlineNs) {
+                    timedOut = true
+                    break
+                }
+                try {
+                    Thread.sleep(Config.SAMPLE_GAP_MS)
+                } catch (_: InterruptedException) {
+                }
+            }
             try {
                 raws.add(source.fetch())
             } catch (e: Exception) {
                 lastErr = e
-            }
-            if (i == rounds - 1) break
-            if (System.nanoTime() > deadlineNs) {
-                timedOut = true
-                break
-            }
-            try {
-                Thread.sleep(Config.SAMPLE_GAP_MS)
-            } catch (_: InterruptedException) {
             }
         }
 

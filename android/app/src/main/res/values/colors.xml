@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  统一调色板 —— 全工程唯一的颜色定义处（两个布局、themes.xml、Kotlin 里的取值都对齐这里）。
+  以前颜色散落在布局里硬编码，"次级文字"出现 6 种白度（#66/#80/#99/#B3/#E6/#FFE6E6E6），
+  深色底上看着发灰发脏；背景色还有 0B0D12 与 0A0C10 两个值。
+-->
+<resources>
+
+    <!-- 背景：全工程只此一个 -->
+    <color name="bg_deep">#FF0A0C10</color>
+    <color name="divider">#1FFFFFFF</color>
+
+    <!-- 文字：4 档就够 -->
+    <color name="text_primary">#FFFFFFFF</color>     <!-- 标题、时间数字 -->
+    <color name="text_secondary">#B3FFFFFF</color>   <!-- 名称、设置项文字（70% 白） -->
+    <color name="text_tertiary">#80FFFFFF</color>    <!-- 说明、脚注（50% 白） -->
+    <color name="text_button">#E6FFFFFF</color>      <!-- 次要按钮文字（90% 白） -->
+
+    <!-- 语义色 -->
+    <color name="accent">#FFFF6A00</color>
+    <color name="ok">#FF34C759</color>
+    <color name="warn">#FFFFC107</color>
+    <!-- 危险色分两种：文字用的要柔和（深色底上才看得清），填充/状态点用的要饱和 -->
+    <color name="danger_text">#FFFF8B84</color>
+    <color name="danger_fill">#FFFF453A</color>
+
+    <!-- 三路来源色（比代码里 ServerClock.colorOf 亮一档，深色底上更清楚） -->
+    <color name="src_bj">#FF34C759</color>
+    <color name="src_tb">#FFFF8A45</color>
+    <color name="src_jd">#FFFF6B61</color>
+
+</resources>

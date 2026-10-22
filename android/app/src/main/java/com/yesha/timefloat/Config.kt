@@ -79,7 +79,13 @@ object Config {
     const val RESYNC_MS_COARSE = 90_000L
     const val RETRY_ON_FAIL_MS = 6_000L
     const val WATCHDOG_MS = 3_000L
-    const val STUCK_MS = 18_000L
+    /**
+     * 判定"卡死"的阈值。必须**明显大于**一轮采样的最坏耗时，否则会在正常的慢网络下
+     * 误判卡死。算一下最坏情况：单源一轮 = SNTP 2 台 × 2 秒超时 + HTTP 兜底 4.5 秒预算
+     * ≈ 8.5 秒；采样预算 12 秒可能在第二轮中途才到 → 整轮最坏 ≈ 17 秒。
+     * 所以取 30 秒，留出安全边界。
+     */
+    const val STUCK_MS = 30_000L
     /**
      * 调度自愈阈值：某一路超过这么久连"开始校时"都没有过，
      * 就认为调度链断了（不管什么原因），看门狗强行补一次。

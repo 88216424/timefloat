@@ -2,7 +2,8 @@
 <resources>
     <!-- 直接用平台 Material 主题，不引入 AppCompat / Material 依赖，包体最小 -->
     <style name="AppTheme" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#FF0B0D12</item>
-        <item name="android:colorAccent">#FFFF6A00</item>
+        <!-- 统一引用调色板：以前这里是 #FF0B0D12，和 bg_deep 的 #FF0A0C10 不一致 -->
+        <item name="android:windowBackground">@color/bg_deep</item>
+        <item name="android:colorAccent">@color/accent</item>
     </style>
 </resources>

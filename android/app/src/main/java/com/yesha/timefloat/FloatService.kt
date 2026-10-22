@@ -97,9 +97,11 @@ class FloatService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         alive = true
         startForegroundCompat(buildNotification())
+        // ★ 不能在这里提前 return：那会跳过 applyPrefs/attachView/acquire/ticker，
+        //   万一视图还没建好（比如上次因无悬浮窗权限 stopSelf 了），服务就会停在
+        //   "通知在、没有悬浮窗、自动校时也没开"的僵尸态。下面这段初始化本身是幂等的。
         if (intent?.action == ACTION_SYNC) {
             TimeHub.instance.forceRefresh()
-            return START_STICKY
         }
         applyPrefs(force = true)
         if (root == null) attachView()
@@ -338,7 +340,9 @@ class FloatService : Service() {
         super.onConfigurationChanged(newConfig)
         // 横竖屏切换 / 分屏变化：字号要按新屏宽重算，位置也要保证还在屏幕内
         applyPrefs(force = true)
-        params?.let { clampAndSave(it) }
+        // ★ 必须 post 到下一帧再夹。此刻视图的 width/height 还是转屏前的旧值，
+        //   直接算会把错误坐标写回 prefs，导致悬浮窗跑到屏幕外。
+        root?.post { params?.let { clampAndSave(it) } }
     }
 
     private fun vibrate(ms: Long) {

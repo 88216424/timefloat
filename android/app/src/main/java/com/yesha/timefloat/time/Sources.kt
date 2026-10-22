@@ -11,6 +11,24 @@ import java.util.concurrent.atomic.AtomicInteger
 
 private fun hostOf(url: String) = url.removePrefix("https://").removePrefix("http://").trimEnd('/')
 
+/**
+ * 换了 Date 探针主机时该做什么。
+ *
+ * 为什么必须有这个：交集器的数学前提是"所有约束来自同一个时钟"。
+ * 京东有两台（api.m.jd.com 走 jfe / www.jd.com 走 nginx），北京兜底也有两台，
+ * 不同边缘机的钟差几十毫秒很正常 —— 把两家的约束混着求交，会夹出一个
+ * "区间更紧、但带系统偏差"的值，而 1000ms 的 jump guard 根本抓不到几十毫秒级偏差。
+ *
+ * 所以：一旦发现本轮样本来自和上一轮不同的主机，就把这一轮判作废
+ * （清空交集器 + 抛异常触发 6 秒后重试），下一轮从新主机干净地重新累积。
+ *
+ * @return 非 null = 应该抛出的异常消息
+ */
+private fun checkHostSwitch(nowUrl: String?, lastUrl: String?): String? {
+    if (nowUrl == null || lastUrl == null || nowUrl == lastUrl) return null
+    return "Date 主机切换（${hostOf(lastUrl)} → ${hostOf(nowUrl)}），本轮作废，下一轮重新累积"
+}
+
 /** 轮换取候选地址：避免每次都卡在同一个坏服务器上 */
 private class Rotator(private val list: List<String>) {
     private val cursor = AtomicInteger(0)
@@ -29,6 +47,9 @@ private class Rotator(private val list: List<String>) {
  *   网络一卡一整轮能跑 60 秒以上，把线程池占死、把调度链拖断（"不会自动校时"就是这么来的）。
  *   现在到点就用手上的样本收工。
  */
+/** 一轮探针的结果：用了哪台主机、本轮真正入库多少样本、**本轮**的最小 rtt */
+private data class BurstResult(val url: String?, val accepted: Int, val minRttMs: Long)
+
 private fun probeBurst(
     urls: List<String>,
     samplesPerUrl: Int,
@@ -36,9 +57,10 @@ private fun probeBurst(
     budgetMs: Long,
     intersector: DateIntersector,
     extraHeaders: Map<String, String> = emptyMap()
-): Pair<String?, Int> {
+): BurstResult {
     val deadline = Mono.ms() + budgetMs
     var accepted = 0
+    var minRtt = -1L
     var goodUrl: String? = null
     var outOfTime = false
 
@@ -55,6 +77,9 @@ private fun probeBurst(
                     intersector.add(s, Mono.ms())
                     ok++
                     accepted++
+                    // 记录**本轮**最小 rtt：界面上那个"往返 Nms"必须反映当前网络，
+                    // 而不是交集器里存了十分钟的历史最小值（那会显得比实际更乐观）
+                    if (minRtt < 0 || s.rttMs < minRtt) minRtt = s.rttMs
                 }
             } catch (_: Exception) {
             }
@@ -63,13 +88,16 @@ private fun probeBurst(
             } catch (_: InterruptedException) {
             }
         }
-        if (ok > 0 && goodUrl == null) {
-            goodUrl = url
-            if (intersector.estimate() != null) break
+        if (ok > 0) {
+            // ★ 一轮只用一台主机。以前这里是"交集器已经有 6 条以上约束才 break"，
+            //   于是前几轮会继续去探第二台主机 —— 而京东/北京的两台主机在不同边缘、
+            //   钟能差几十毫秒，混进同一个交集器就会夹出"更紧但带系统偏差"的值。
+            if (goodUrl == null) goodUrl = url
+            break
         }
         if (outOfTime) break
     }
-    return goodUrl to accepted
+    return BurstResult(goodUrl, accepted, minRtt)
 }
 
 // =====================================================================================
@@ -83,6 +111,10 @@ class BeijingSource : TimeSource {
 
     private val rotator = Rotator(Config.SNTP_HOSTS)
     private val intersector = DateIntersector()
+
+    /** 上一轮实际用的探针 URL：用来检测"换了主机"，换了就要清空交集器 */
+    @Volatile
+    private var lastProbeUrl: String? = null
 
     @Volatile
     private var ntpDownUntilMono = 0L
@@ -129,23 +161,38 @@ class BeijingSource : TimeSource {
         // ---------- 2) HTTP Date 头秒边界交集兜底 ----------
         // 注意：这里**不要** reset 交集器 —— 跨轮次累积才能把区间越收越紧
         // （设备重启时 DateIntersector 自己会检测单调钟倒退并清空）
-        val (url, accepted) = probeBurst(
+        val burst = probeBurst(
             Config.BJ_DATE_PROBE_URLS,
             Config.BJ_DATE_PROBE_SAMPLES,
             Config.JD_PROBE_GAP_MS,
             Config.BJ_BURST_BUDGET_MS,
-            intersector
+            intersector,
+            // 百度/腾讯首页是几百 KB：加 Range 只取首字节，Date 头照样在，流量省掉 99%
+            mapOf("Range" to "bytes=0-0")
         )
+        // ★ 关键：本轮**一条新样本都没拿到**时，绝不能用交集器里上一轮留下的旧约束
+        //   糊弄出一个"刚校准"的结果 —— 旧约束照样能算出 estimate，
+        //   界面会显示绿色的"往返 26ms · 0s前校准"，而那个偏移可能早就过时了，
+        //   而且 isStale() 永远不会触发（这是"时间一定准"的最后一道兜底）。
+        if (burst.accepted == 0) throw IOException("NTP 不通，本轮 HTTP Date 兜底 0 个有效样本")
+        checkHostSwitch(burst.url, lastProbeUrl)?.let {
+            // ★ 必须真的清空：交集器里已经混了上一台主机的约束，
+            //   不清掉的话"本轮作废"只是白说，下一轮照样拿两家的约束求交
+            intersector.reset()
+            lastProbeUrl = burst.url
+            throw IOException(it)
+        }
+        if (burst.url != null) lastProbeUrl = burst.url
         val est = intersector.estimate()
-            ?: throw IOException("NTP 不通，HTTP Date 兜底样本不足（本轮有效 $accepted 次）")
+            ?: throw IOException("NTP 不通，HTTP Date 兜底样本不足（本轮有效 ${burst.accepted} 次）")
         lastModeDateOnly = true
         lastHalfWidthMs = est.halfWidthMs.coerceAtLeast(8)
         val mono = Mono.ms()
         return RawSync(
             serverUtcMsAtRecv = mono + est.offsetMs,
             monoMsAtRecv = mono,
-            rttMs = intersector.lastMinRttMs.coerceAtLeast(1),
-            strategy = "HTTP Date 秒边界交集 ${hostOf(url ?: "")}（${est.samples} 样本 · ±${est.halfWidthMs}ms）",
+            rttMs = burst.minRttMs.coerceAtLeast(1),
+            strategy = "HTTP Date 秒边界交集 ${hostOf(burst.url ?: "")}（${est.samples} 样本 · ±${est.halfWidthMs}ms）",
             preciseMs = true
         )
     }
@@ -223,6 +270,10 @@ class JdSource : TimeSource {
 
     private val intersector = DateIntersector()
 
+    /** 上一轮实际用的探针 URL：用来检测"换了主机"，换了就要清空交集器 */
+    @Volatile
+    private var lastProbeUrl: String? = null
+
     @Volatile
     private var lastHalfWidthMs = 30L
 
@@ -240,7 +291,7 @@ class JdSource : TimeSource {
             Config.JD_PROBE_URLS.forEach { if (it != goodUrl) add(it) }
         }
 
-        val (url, accepted) = probeBurst(
+        val burst = probeBurst(
             urls,
             Config.JD_PROBE_SAMPLES,
             Config.JD_PROBE_GAP_MS,
@@ -248,18 +299,26 @@ class JdSource : TimeSource {
             intersector,
             mapOf("Referer" to "https://www.jd.com/")
         )
-        if (url != null) goodUrl = url
+        // ★ 本轮零新样本时不许用旧约束冒充"刚校准"（同北京兜底那条注释）
+        if (burst.accepted == 0) throw IOException("京东本轮 0 个有效 Date 样本")
+        checkHostSwitch(burst.url, lastProbeUrl)?.let {
+            // ★ 同北京兜底：换了主机（jfe → nginx）就把交集器清空，别拿两家的约束混着求交
+            intersector.reset()
+            lastProbeUrl = burst.url
+            throw IOException(it)
+        }
+        if (burst.url != null) { goodUrl = burst.url; lastProbeUrl = burst.url }
 
         val est = intersector.estimate()
-            ?: throw IOException("京东 Date 头样本不足（本轮有效 $accepted 次）")
+            ?: throw IOException("京东 Date 头样本不足（本轮有效 ${burst.accepted} 次）")
 
         lastHalfWidthMs = est.halfWidthMs.coerceAtLeast(8)
         val mono = Mono.ms()
         return RawSync(
             serverUtcMsAtRecv = mono + est.offsetMs,
             monoMsAtRecv = mono,
-            rttMs = intersector.lastMinRttMs.coerceAtLeast(1),
-            strategy = "Date 秒边界交集 ${hostOf(url ?: "")}（${est.samples} 样本 · ±${est.halfWidthMs}ms）",
+            rttMs = burst.minRttMs.coerceAtLeast(1),
+            strategy = "Date 秒边界交集 ${hostOf(burst.url ?: "")}（${est.samples} 样本 · ±${est.halfWidthMs}ms）",
             preciseMs = true
         )
     }

@@ -38,19 +38,27 @@ object Http {
 
     class HttpError(message: String) : IOException(message)
 
-    /** 普通 GET：一次性读完 */
+    /** 普通 GET：一次性读完（有硬上限） */
     fun get(
         url: String,
         timeoutMs: Int = Config.HTTP_TIMEOUT_MS,
         readTimeoutMs: Int = Config.HTTP_READ_TIMEOUT_MS,
-        headers: Map<String, String> = emptyMap()
+        headers: Map<String, String> = emptyMap(),
+        /**
+         * ★ 响应体硬上限。readTimeout 只是"每次 read"的上限：服务器只要每 <2.5 秒吐一点数据，
+         *   readText() 就能**无限读下去**（时间无界，不只是内存），而采样预算只在轮与轮之间判，
+         *   拦不住一轮内部 —— 淘宝那路被风控返回大页面/慢速响应时能把一整轮拖死。
+         *   校时实际只需要几十字节（淘宝的 t 字段），256KB 已经极其宽松。
+         */
+        maxBytes: Int = 256 * 1024
     ): HttpResult {
         val t0 = System.nanoTime()
         val conn = open(url, timeoutMs, readTimeoutMs, headers)
         try {
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-            val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
+            val raw = stream?.use { readCapped(it, maxBytes) } ?: ByteArray(0)
+            val body = String(raw, Charsets.UTF_8)
             val monoRecv = Mono.ms()
             val rtt = (System.nanoTime() - t0) / 1_000_000
             return HttpResult(
@@ -59,13 +67,28 @@ object Http {
                 monoAtRecvMs = monoRecv,
                 rttMs = rtt,
                 dateHeaderUtcMs = parseHttpDate(conn.getHeaderField("Date")),
-                bytes = body.length
+                bytes = raw.size
             )
         } catch (e: SocketTimeoutException) {
             throw HttpError("请求超时（${timeoutMs}ms）")
         } finally {
             conn.disconnect()
         }
+    }
+
+    /** 有上限地读完流（超限立刻放弃），返回真实字节 */
+    private fun readCapped(ins: java.io.InputStream, maxBytes: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream(8192)
+        val chunk = ByteArray(8192)
+        var total = 0
+        while (true) {
+            val n = ins.read(chunk)
+            if (n < 0) break
+            total += n
+            if (total > maxBytes) throw HttpError("响应体超过 ${maxBytes / 1024}KB，已放弃")
+            out.write(chunk, 0, n)
+        }
+        return out.toByteArray()
     }
 
     data class StreamingResult(

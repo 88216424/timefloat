@@ -116,6 +116,9 @@ class MainActivity : Activity() {
         sbScale = findViewById(R.id.sbScale)
         swMs = findViewById(R.id.swMs)
         swLock = findViewById(R.id.swLock)
+        // 底部版本脚注：让"设备上装的到底是哪一版"一眼可见
+        // （以前版本号恒为 1.0，重复抱怨时根本没法判断有没有重装）
+        findViewById<TextView>(R.id.tvBuild).text = buildFooter()
 
         loadPrefsIntoViews()
 
@@ -136,16 +139,46 @@ class MainActivity : Activity() {
 
         val seek = object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser) saveAppearance()
+                // ★ 拖动过程中**不能**每动一格就写一次 SharedPreferences 并递增 K_REV：
+                //   悬浮窗是靠 K_REV 变化热重载的，拖一次滑块会触发上百次重排。
+                //   改成拖完 250ms 落一次盘。
+                if (fromUser) scheduleSaveAppearance()
             }
 
             override fun onStartTrackingTouch(sb: SeekBar?) {}
-            override fun onStopTrackingTouch(sb: SeekBar?) {}
+
+            override fun onStopTrackingTouch(sb: SeekBar?) {
+                flushSaveAppearance()
+            }
         }
         sbAlpha.setOnSeekBarChangeListener(seek)
         sbScale.setOnSeekBarChangeListener(seek)
         swMs.setOnCheckedChangeListener { _, _ -> saveAppearance() }
         swLock.setOnCheckedChangeListener { _, _ -> saveAppearance() }
+    }
+
+    private val saveHandler = Handler(Looper.getMainLooper())
+    private var savePending = false
+    private val saveRunnable = Runnable {
+        // ★ 必须复位：否则防抖跑完后标志还是 true，之后任何 flush 都会白写一次 prefs
+        //   并让 K_REV +1，悬浮窗跟着白热重载一次
+        savePending = false
+        saveAppearance()
+    }
+
+    private fun scheduleSaveAppearance() {
+        savePending = true
+        saveHandler.removeCallbacks(saveRunnable)
+        saveHandler.postDelayed(saveRunnable, 250)
+    }
+
+    /** 松手/退到后台时立刻落盘，避免最后一次调整丢掉 */
+    private fun flushSaveAppearance() {
+        saveHandler.removeCallbacks(saveRunnable)
+        if (savePending) {
+            savePending = false
+            saveAppearance()
+        }
     }
 
     override fun onResume() {
@@ -166,8 +199,17 @@ class MainActivity : Activity() {
         handler.post(ticker)
     }
 
-    private fun invalidateRenderCache() {
-        lastSkewText = null
+    /** 底部版本脚注：版本名 + 安装时间。让"设备上装的是哪一版"一眼可见 */
+    private fun buildFooter(): String = try {
+        val pi = packageManager.getPackageInfo(packageName, 0)
+        val whenStr = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA)
+            .format(java.util.Date(pi.lastUpdateTime))
+        getString(R.string.build_footer, pi.versionName, whenStr)
+    } catch (_: Throwable) {
+        ""
+    }
+
+    private fun invalidateRenderCache() {        lastSkewText = null
         lastSkewColor = Int.MIN_VALUE
         lastFloatSrcText = null
         lastFloatSrcColor = Int.MIN_VALUE
@@ -179,6 +221,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         handler.removeCallbacks(ticker)
+        flushSaveAppearance()
         if (attached) {
             TimeHub.instance.release()
             attached = false
@@ -190,6 +233,12 @@ class MainActivity : Activity() {
 
     /** 选择悬浮窗显示哪一路 —— 只在启动悬浮窗之前有意义 */
     private fun pickSource(id: String) {
+        // ★ 需求就是"启动悬浮窗之前选好，开着的时候不要切换"：
+        //   抢购时误触一下就换了显示源，看到的就不是你要抢的那家时间了。
+        if (FloatService.isRunning(this)) {
+            toast("悬浮窗运行中，先关掉它才能换源（避免抢购时看错时间）")
+            return
+        }
         prefs.edit()
             .putString(Config.K_FLOAT_SRC, id)
             .putInt(Config.K_REV, prefs.getInt(Config.K_REV, 0) + 1)
@@ -197,11 +246,7 @@ class MainActivity : Activity() {
         TimeHub.instance.selectedId = id
         renderFast()
         renderSlow()
-        if (FloatService.isRunning(this)) {
-            toast("悬浮窗正在运行，已同步切换为「${ServerClock.displayName(id)}」")
-        } else {
-            toast("悬浮窗将显示：${ServerClock.displayName(id)}")
-        }
+        toast("悬浮窗将显示：${ServerClock.displayName(id)}")
     }
 
     private fun requestOverlay() {
@@ -329,7 +374,7 @@ class MainActivity : Activity() {
         }
         tvCross.setTextColor(
             when {
-                cross.level < 0 -> Color.parseColor("#99FFFFFF")
+                cross.level < 0 -> Color.parseColor("#80FFFFFF")
                 cross.level == 0 -> Color.parseColor("#FF34C759")
                 cross.level == 1 -> Color.parseColor("#FFFFC107")
                 else -> Color.parseColor("#FFFF8B84")
@@ -388,7 +433,7 @@ class MainActivity : Activity() {
             val d = t - base
             text = Fmt.delta(d) + "ms"
             color = when {
-                abs(d) <= 30 -> Color.parseColor("#99FFFFFF")
+                abs(d) <= 30 -> Color.parseColor("#B3FFFFFF")
                 abs(d) <= 200 -> Color.parseColor("#FFFFC107")
                 else -> Color.parseColor("#FFFF453A")
             }

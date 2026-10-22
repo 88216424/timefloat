@@ -2,7 +2,7 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#FF0A0C10"
+    android:background="@color/bg_deep"
     android:fillViewport="true">
 
     <LinearLayout
@@ -10,24 +10,24 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingStart="16dp"
-        android:paddingTop="18dp"
+        android:paddingTop="20dp"
         android:paddingEnd="16dp"
-        android:paddingBottom="24dp">
+        android:paddingBottom="28dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/main_title"
-            android:textColor="#FFFFFFFF"
-            android:textSize="24sp"
+            android:textColor="@color/text_primary"
+            android:textSize="26sp"
             android:textStyle="bold" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
+            android:layout_marginTop="3dp"
             android:text="@string/main_subtitle"
-            android:textColor="#66FFFFFF"
+            android:textColor="@color/text_tertiary"
             android:textSize="12sp" />
 
         <!-- ================= 主卡：三路时间（点选一路给悬浮窗用） ================= -->
@@ -44,7 +44,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="本机墙钟：正在校时…"
-                android:textColor="#FFFFC107"
+                android:textColor="@color/warn"
                 android:textSize="14sp"
                 android:textStyle="bold" />
 
@@ -54,7 +54,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="三源互差：等待校时"
-                android:textColor="#99FFFFFF"
+                android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
 
             <!-- 北京 -->
@@ -66,9 +66,9 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="10dp"
-                android:paddingTop="9dp"
+                android:paddingTop="10dp"
                 android:paddingEnd="10dp"
-                android:paddingBottom="9dp">
+                android:paddingBottom="10dp">
 
                 <View
                     android:id="@+id/dotBj"
@@ -80,17 +80,20 @@
                     android:layout_width="40dp"
                     android:layout_height="wrap_content"
                     android:text="@string/name_bj"
-                    android:textColor="#B3FFFFFF"
+                    android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 
+                <!-- maxLines=1：小屏 + 系统大字体时，12 字符时间一旦换行会把整行高度撑坏 -->
                 <TextView
                     android:id="@+id/tvTimeBj"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:fontFamily="monospace"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
                     android:text="--:--:--.---"
-                    android:textColor="#FFFFFFFF"
+                    android:textColor="@color/src_bj"
                     android:textSize="21sp" />
 
                 <TextView
@@ -99,12 +102,14 @@
                     android:layout_height="wrap_content"
                     android:background="@drawable/bg_chip"
                     android:fontFamily="monospace"
+                    android:gravity="center"
+                    android:minWidth="46dp"
                     android:paddingStart="8dp"
                     android:paddingTop="2dp"
                     android:paddingEnd="8dp"
                     android:paddingBottom="2dp"
                     android:text="基准"
-                    android:textColor="#99FFFFFF"
+                    android:textColor="@color/text_secondary"
                     android:textSize="10sp" />
             </LinearLayout>
 
@@ -117,9 +122,9 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="10dp"
-                android:paddingTop="9dp"
+                android:paddingTop="10dp"
                 android:paddingEnd="10dp"
-                android:paddingBottom="9dp">
+                android:paddingBottom="10dp">
 
                 <View
                     android:id="@+id/dotTaobao"
@@ -131,7 +136,7 @@
                     android:layout_width="40dp"
                     android:layout_height="wrap_content"
                     android:text="@string/name_tb"
-                    android:textColor="#B3FFFFFF"
+                    android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 
                 <TextView
@@ -140,8 +145,10 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:fontFamily="monospace"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
                     android:text="--:--:--.---"
-                    android:textColor="#FFFF8A45"
+                    android:textColor="@color/src_tb"
                     android:textSize="21sp" />
 
                 <TextView
@@ -150,12 +157,14 @@
                     android:layout_height="wrap_content"
                     android:background="@drawable/bg_chip"
                     android:fontFamily="monospace"
+                    android:gravity="center"
+                    android:minWidth="46dp"
                     android:paddingStart="8dp"
                     android:paddingTop="2dp"
                     android:paddingEnd="8dp"
                     android:paddingBottom="2dp"
                     android:text="--"
-                    android:textColor="#99FFFFFF"
+                    android:textColor="@color/text_secondary"
                     android:textSize="10sp" />
             </LinearLayout>
 
@@ -168,9 +177,9 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingStart="10dp"
-                android:paddingTop="9dp"
+                android:paddingTop="10dp"
                 android:paddingEnd="10dp"
-                android:paddingBottom="9dp">
+                android:paddingBottom="10dp">
 
                 <View
                     android:id="@+id/dotJd"
@@ -182,7 +191,7 @@
                     android:layout_width="40dp"
                     android:layout_height="wrap_content"
                     android:text="@string/name_jd"
-                    android:textColor="#B3FFFFFF"
+                    android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 
                 <TextView
@@ -191,8 +200,10 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:fontFamily="monospace"
+                    android:includeFontPadding="false"
+                    android:maxLines="1"
                     android:text="--:--:--.---"
-                    android:textColor="#FFFF6B61"
+                    android:textColor="@color/src_jd"
                     android:textSize="21sp" />
 
                 <TextView
@@ -201,12 +212,14 @@
                     android:layout_height="wrap_content"
                     android:background="@drawable/bg_chip"
                     android:fontFamily="monospace"
+                    android:gravity="center"
+                    android:minWidth="46dp"
                     android:paddingStart="8dp"
                     android:paddingTop="2dp"
                     android:paddingEnd="8dp"
                     android:paddingBottom="2dp"
                     android:text="--"
-                    android:textColor="#99FFFFFF"
+                    android:textColor="@color/text_secondary"
                     android:textSize="10sp" />
             </LinearLayout>
 
@@ -216,7 +229,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:text="@string/pick_hint"
-                android:textColor="#80FFFFFF"
+                android:textColor="@color/text_tertiary"
                 android:textSize="11sp" />
 
             <View
@@ -224,17 +237,25 @@
                 android:layout_height="1dp"
                 android:layout_marginTop="10dp"
                 android:layout_marginBottom="10dp"
-                android:background="#1FFFFFFF" />
+                android:background="@color/divider" />
 
             <TextView
                 android:id="@+id/tvDetail"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:fontFamily="monospace"
                 android:lineSpacingExtra="3dp"
                 android:text=""
-                android:textColor="#99FFFFFF"
-                android:textSize="10sp" />
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+
+            <TextView
+                android:id="@+id/tvBuild"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text=""
+                android:textColor="@color/text_tertiary"
+                android:textSize="11sp" />
         </LinearLayout>
 
         <!-- ================= 悬浮窗控制 ================= -->
@@ -256,8 +277,8 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="悬浮窗"
-                    android:textColor="#FFFFFFFF"
+                    android:text="@string/sec_window"
+                    android:textColor="@color/text_primary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
@@ -271,7 +292,7 @@
                     android:paddingEnd="10dp"
                     android:paddingBottom="3dp"
                     android:text="显示：淘宝"
-                    android:textColor="#FFFF8A45"
+                    android:textColor="@color/src_tb"
                     android:textSize="11sp" />
             </LinearLayout>
 
@@ -283,10 +304,10 @@
                 android:background="@drawable/pill_primary"
                 android:foreground="?android:attr/selectableItemBackground"
                 android:gravity="center"
-                android:paddingTop="11dp"
-                android:paddingBottom="11dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp"
                 android:text="@string/start_float"
-                android:textColor="#FFFFFFFF"
+                android:textColor="@color/text_primary"
                 android:textSize="15sp"
                 android:textStyle="bold" />
 
@@ -304,10 +325,10 @@
                     android:background="@drawable/pill_ghost"
                     android:foreground="?android:attr/selectableItemBackground"
                     android:gravity="center"
-                    android:paddingTop="10dp"
-                    android:paddingBottom="10dp"
+                    android:paddingTop="11dp"
+                    android:paddingBottom="11dp"
                     android:text="@string/grant_overlay"
-                    android:textColor="#E6FFFFFF"
+                    android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 
                 <TextView
@@ -319,10 +340,10 @@
                     android:background="@drawable/pill_danger"
                     android:foreground="?android:attr/selectableItemBackground"
                     android:gravity="center"
-                    android:paddingTop="10dp"
-                    android:paddingBottom="10dp"
+                    android:paddingTop="11dp"
+                    android:paddingBottom="11dp"
                     android:text="@string/stop_float"
-                    android:textColor="#FFFF8B84"
+                    android:textColor="@color/danger_text"
                     android:textSize="13sp" />
 
                 <TextView
@@ -334,10 +355,10 @@
                     android:background="@drawable/pill_ghost"
                     android:foreground="?android:attr/selectableItemBackground"
                     android:gravity="center"
-                    android:paddingTop="10dp"
-                    android:paddingBottom="10dp"
+                    android:paddingTop="11dp"
+                    android:paddingBottom="11dp"
                     android:text="@string/sync_now"
-                    android:textColor="#E6FFFFFF"
+                    android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
             </LinearLayout>
 
@@ -347,7 +368,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
                 android:text=""
-                android:textColor="#80FFFFFF"
+                android:textColor="@color/text_tertiary"
                 android:textSize="11sp" />
         </LinearLayout>
 
@@ -363,8 +384,8 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="悬浮窗外观"
-                android:textColor="#FFFFFFFF"
+                android:text="@string/sec_appearance"
+                android:textColor="@color/text_primary"
                 android:textSize="16sp"
                 android:textStyle="bold" />
 
@@ -372,9 +393,9 @@
                 android:id="@+id/tvAlpha"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="12dp"
                 android:text="不透明度：94%"
-                android:textColor="#FFE6E6E6"
+                android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
 
             <SeekBar
@@ -382,8 +403,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:max="80"
-                android:progressTint="#FFFF6A00"
-                android:thumbTint="#FFFF6A00" />
+                android:progressTint="@color/accent"
+                android:thumbTint="@color/accent" />
 
             <TextView
                 android:id="@+id/tvScale"
@@ -391,7 +412,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
                 android:text="字号：100%"
-                android:textColor="#FFE6E6E6"
+                android:textColor="@color/text_secondary"
                 android:textSize="13sp" />
 
             <SeekBar
@@ -399,25 +420,30 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:max="140"
-                android:progressTint="#FFFF6A00"
-                android:thumbTint="#FFFF6A00" />
+                android:progressTint="@color/accent"
+                android:thumbTint="@color/accent" />
 
+            <!-- 开关也统一成主题色，别用系统默认的蓝/绿（和整体橙色不搭） -->
             <Switch
                 android:id="@+id/swMs"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="6dp"
                 android:text="@string/sec_ms"
-                android:textColor="#FFE6E6E6"
-                android:textSize="14sp" />
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:thumbTint="@color/accent"
+                android:trackTint="@color/accent" />
 
             <Switch
                 android:id="@+id/swLock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/sec_lock"
-                android:textColor="#FFE6E6E6"
-                android:textSize="14sp" />
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp"
+                android:thumbTint="@color/accent"
+                android:trackTint="@color/accent" />
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

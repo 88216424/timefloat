@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
 /**
@@ -50,12 +51,29 @@ class TimeHub private constructor() {
         }
     }
 
+    /**
+     * 看门狗用**独立**的单线程池。
+     * 不能和同步任务共用一个池：网络半死时 3 路同步各要十几秒、队列里还有被作废的旧任务，
+     * 6 个线程被占满后看门狗自己反而被排队延迟 —— 而它正是"自动校时永不永久停止"的唯一机制。
+     */
+    private val watchdogPool: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "timefloat-watchdog").apply { isDaemon = true }
+    }
+
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val busy = ConcurrentHashMap<String, Long>()
 
+    /**
+     * 每一路的「调度代次」。看门狗判定某路卡死、或用户点刷新时，就把代次 +1，
+     * 于是那个还在跑的旧任务**作废**：
+     *   · 它迟到返回时不写结果（不会被旧数据覆盖新数据）；
+     *   · 它的 finally 也不会再排下一条链（否则卡死一次就分裂成两条链，越滚越多）。
+     */
+    private val generation = ConcurrentHashMap<String, Int>()
+
     @Volatile private var running = false
     @Volatile private var refCount = 0
-    @Volatile private var watchdogRunning = false
+    private var watchdogFuture: ScheduledFuture<*>? = null
 
     fun acquire() {
         refCount++
@@ -79,7 +97,17 @@ class TimeHub private constructor() {
 
     private fun stop() {
         running = false
+        // 看门狗也停掉：Activity 退到后台又没开悬浮窗时，不该每 3 秒白醒一次
+        watchdogFuture?.cancel(false)
+        watchdogFuture = null
         // 注意：这里不能动时钟状态，否则再次打开会显示成"校时中"
+    }
+
+    private fun genOf(id: String): Int = generation[id] ?: 0
+
+    /** merge 是原子的：bumpGen 会被 UI 线程（点刷新）和看门狗线程同时调用 */
+    private fun bumpGen(id: String) {
+        generation.merge(id, 1) { a, _ -> a + 1 }
     }
 
     fun refresh(id: String? = null) {
@@ -89,8 +117,9 @@ class TimeHub private constructor() {
 
     fun refreshAll() = refresh(null)
 
-    /** 用户点「刷新」：清掉并发标记立刻重来 */
+    /** 用户点「刷新」：作废在跑的旧任务 + 清掉并发标记，立刻重来 */
     fun forceRefresh() {
+        clocks.forEach { bumpGen(it.id) }
         busy.clear()
         clocks.forEach { it.markSyncing() }
         notifyListeners()
@@ -116,10 +145,16 @@ class TimeHub private constructor() {
     }
 
     private fun ensureWatchdog() {
-        if (watchdogRunning) return
-        watchdogRunning = true
-        pool.scheduleWithFixedDelay(
-            { watchdog() },
+        if (watchdogFuture != null) return
+        watchdogFuture = watchdogPool.scheduleWithFixedDelay(
+            {
+                // ★ 必须包住异常：scheduleWithFixedDelay 一旦抛出就会**永久停止**后续调度，
+                //   看门狗自己死了就等于"自动校时再也不恢复"。
+                try {
+                    watchdog()
+                } catch (_: Throwable) {
+                }
+            },
             Config.WATCHDOG_MS,
             Config.WATCHDOG_MS,
             TimeUnit.MILLISECONDS
@@ -140,6 +175,7 @@ class TimeHub private constructor() {
             val since = c.syncingSinceMono
             if (since > 0 && now - since > Config.STUCK_MS) {
                 c.markFail("校时超时（超过 ${Config.STUCK_MS / 1000} 秒），已自动重排")
+                bumpGen(c.id)          // ★ 关键：作废那个卡住的任务，别让它回来再排一条链
                 busy.remove(c.id)
                 if (running) scheduleSync(c, Config.RETRY_ON_FAIL_MS)
                 continue
@@ -164,20 +200,39 @@ class TimeHub private constructor() {
     private fun scheduleSync(clock: ServerClock, delayMs: Long) {
         val stamp = Mono.ms()
         if (busy.putIfAbsent(clock.id, stamp) != null) return
+        val myGen = genOf(clock.id)
 
-        pool.schedule({
+        val task = Runnable {
+            // ★ 被 bumpGen 作废、但早就排在队列里的任务（延迟最长 60 秒）：立刻退场。
+            //   否则它会白跑一整轮网络请求，还会 markSyncing 把状态刷成"校时中"、
+            //   把卡死判定的时间基准一起推后。
+            if (myGen != genOf(clock.id)) {
+                busy.remove(clock.id, stamp)
+                return@Runnable
+            }
+
+            // 本轮是否被"暂缓采纳"（结果和当前钟面差太多，等下一轮确认）
+            var held = false
             try {
                 clock.markSyncing()
                 notifyListeners()
                 val summary = Sampler.run(clock.source)
-                clock.apply(summary)
+                // 只有代次没变（没被看门狗判死、没被用户刷新顶掉）的任务才允许写结果
+                if (myGen == genOf(clock.id)) {
+                    held = clock.apply(summary) == ServerClock.ApplyResult.HELD_SUSPICIOUS
+                }
             } catch (e: Exception) {
-                clock.markFail(e.message ?: e.javaClass.simpleName)
+                if (myGen == genOf(clock.id)) {
+                    clock.markFail(e.message ?: e.javaClass.simpleName)
+                }
             } finally {
                 busy.remove(clock.id, stamp)
                 notifyListeners()
-                if (running) {
+                // 迟到的旧任务不再排下一条链 —— 否则看门狗每判一次卡死，链就多一条
+                if (running && myGen == genOf(clock.id)) {
                     val delay = when {
+                        // 暂缓采纳时要尽快来第二轮做确认，别等 60 秒
+                        held -> Config.RETRY_ON_FAIL_MS
                         clock.state == ServerClock.State.OK && clock.preciseMs -> Config.RESYNC_MS_PRECISE
                         clock.state == ServerClock.State.OK -> Config.RESYNC_MS_COARSE
                         else -> Config.RETRY_ON_FAIL_MS
@@ -185,7 +240,8 @@ class TimeHub private constructor() {
                     scheduleSync(clock, delay)
                 }
             }
-        }, delayMs, TimeUnit.MILLISECONDS)
+        }
+        pool.schedule(task, delayMs, TimeUnit.MILLISECONDS)
     }
 
     private fun notifyListeners() {

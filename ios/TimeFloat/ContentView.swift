@@ -37,7 +37,8 @@ struct ContentView: View {
                 }
                 .padding(16)
             }
-            .background(Palette.bgTop.ignoresSafeArea())
+            // 只留一层：SwiftUI 里 .background 叠加时后加的在更底层，
+            // 之前写了"纯色 + 渐变"两层，纯色会把渐变整个盖住（等于白写）
             .background(
                 LinearGradient(colors: [Palette.bgTop, Palette.bgBottom],
                                startPoint: .top, endPoint: .bottom)

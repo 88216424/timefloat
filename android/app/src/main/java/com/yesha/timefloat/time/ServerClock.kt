@@ -64,8 +64,13 @@ class ServerClock(val source: TimeSource) {
     @Volatile var lastAttemptMonoMs: Long = 0
         private set
 
+    /**
+     * 最近一次成功校对的时刻（单调钟）。
+     * 由同步线程写、UI 线程读（ageMs/isStale）→ **必须 @Volatile**，
+     * 否则刚校完界面可能还读到旧值，显示成"Xs前校准"偏大；32 位设备上 Long 还会撕裂读。
+     */
+    @Volatile
     private var lastOkMonoMs: Long = 0
-    private var lastOkWallMs: Long = 0
     private var candidateOffset: Double = Double.NaN
     private var candidateHits = 0
 
@@ -152,7 +157,6 @@ class ServerClock(val source: TimeSource) {
         preciseMs = s.preciseMs
         lastTookMs = s.tookMs
         lastOkMonoMs = mono
-        lastOkWallMs = System.currentTimeMillis()
         syncCount++
         error = ""
         syncingSinceMono = 0

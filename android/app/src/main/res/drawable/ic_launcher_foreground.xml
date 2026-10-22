@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标的前景层。
+  关键点：自适应图标是 108×108 画布、但系统只保证中间 72×72（约 66%）不被裁掉，
+  所以这里把原图的钟面**整体缩到 0.62 倍**（关于中心 54,54 缩放），
+  这样无论是圆角方、圆形还是水滴形遮罩，钟面都不会被切掉。
+  原图那份满幅方块版仍保留在 drawable/ic_launcher.xml，供 API 24~25 用。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.62"
+        android:scaleY="0.62">
+
+        <!-- 橙色表圈（空心圆） -->
+        <path
+            android:fillColor="#FF6A00"
+            android:pathData="M54,20a34,34 0,1 0,0.1 0zM54,26a28,28 0,1 1,-0.1 0z" />
+        <!-- 指针：竖条 + 斜条 -->
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M51,32h6v24h-6z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,53l15,9 -3,5 -15,-9z" />
+        <!-- 底部京东红条 -->
+        <path
+            android:fillColor="#E1251B"
+            android:pathData="M24,74h60v8h-60z" />
+    </group>
+</vector>

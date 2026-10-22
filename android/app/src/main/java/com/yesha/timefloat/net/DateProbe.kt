@@ -61,6 +61,18 @@ object DateProbe {
             if (code !in 200..499) return null
             val raw = conn.getHeaderField("Date") ?: return null
             val dateMs = synchronized(FMT) { FMT.parse(raw)?.time } ?: return null
+            // ★ 小响应体顺手读掉，让连接能回 keep-alive 池：京东那台只有几十字节，
+            //   一轮 12 次探针就不用每次重做 TCP+TLS 握手（rtt 更稳、被风控概率更低）。
+            //   大响应（百度/腾讯首页）不读 —— 调用方会给它们带 `Range: bytes=0-0`，响应只有 1 字节。
+            //   注意：测量值在上面的 recvMono/rtt 就已取好，这里的读 body 不可能影响采样时刻。
+            //   contentLength 未知（-1）时也一律不读，避免又变成"无限读"。
+            val len = conn.contentLengthLong
+            if (len in 0..8192) {
+                try {
+                    conn.inputStream.use { it.readBytes() }
+                } catch (_: Exception) {
+                }
+            }
             // L = 服务器生成该响应时的本地单调时刻 ≈ 收到时刻 - 单程时延
             val l = recvMono - rtt / 2
             return DateSample(

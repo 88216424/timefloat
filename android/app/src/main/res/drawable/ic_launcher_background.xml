@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 自适应图标的背景层：纯深色底（和 bg_deep 同族，略亮一点以免在深色桌面上糊住） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FF14171E" />
+</shape>

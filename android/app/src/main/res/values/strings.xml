@@ -4,6 +4,7 @@
     <string name="name_bj">北京</string>
     <string name="name_tb">淘宝</string>
     <string name="name_jd">京东</string>
+    <!-- 悬浮窗上的按钮：窗口窄，用短词"刷新"；主界面同一个动作用"立即校时"（文案更长更好懂）-->
     <string name="btn_refresh">刷新</string>
     <string name="btn_close">关闭</string>
 
@@ -13,10 +14,15 @@
     <string name="start_float">启动悬浮窗</string>
     <string name="stop_float">停止悬浮窗</string>
     <string name="sync_now">立即校时</string>
-    <string name="pick_hint">点一下要盯的那路时间，悬浮窗就显示它（启动前选好）</string>
+    <!-- 与本轮新规则一致：运行中禁止换源 -->
+    <string name="pick_hint">启动悬浮窗前点一下要盯的那路；悬浮窗运行中不能切换（防止抢购时看错时间）</string>
+    <string name="sec_window">悬浮窗</string>
+    <string name="sec_appearance">悬浮窗外观</string>
     <string name="sec_lock">锁定位置（防止误拖）</string>
     <string name="sec_ms">显示毫秒</string>
     <string name="notice_channel">悬浮窗服务</string>
     <string name="notice_title">三源对时运行中</string>
     <string name="notice_text">点按打开设置</string>
+    <!-- 底部版本脚注：%1$s = 版本名，%2$s = 安装时间（方便确认设备上装的是哪一版）-->
+    <string name="build_footer">v%1$s · 安装于 %2$s</string>
 </resources>

@@ -40,11 +40,23 @@ object SntpClient {
 
             val data = recv.data
             if (recv.length < 48) throw IllegalStateException("NTP 回包过短: ${recv.length}")
+
+            // ★ 回包合法性校验（以前完全没校验，是个隐患）：
+            //   NTP 服务器可能回 KoD（Kiss-o'-Death）包：mode=3、stratum=0、transmit=0。
+            //   这种包 rtt 往往很小，会被 min-RTT 窗口优先选中；连续两轮就能骗过 jump guard，
+            //   钟面直接跳到 1900 年。所以 mode / stratum / 时间戳范围三道都要卡。
+            val mode = data[0].toInt() and 0x07
+            if (mode != 4 && mode != 5) throw IllegalStateException("NTP 回包 mode=$mode 不是服务端应答")
             val stratum = data[1].toInt() and 0xFF
+            if (stratum == 0) throw IllegalStateException("NTP 返回 KoD / 未同步包（stratum=0）")
             val refId = String(data, 12, 4, Charsets.US_ASCII).trim { it <= ' ' || it == '\u0000' }
 
             // Transmit Timestamp 在 40..47（秒 + 小数部分，均大端）
             val sec = u32(data, 40)
+            val unixSec = sec - NTP_EPOCH_DIFF_S
+            if (unixSec < 1_577_836_800L || unixSec > 2_208_988_800L) {
+                throw IllegalStateException("NTP 回包时间戳不合理（换算后 $unixSec 秒）")
+            }
             val frac = u32(data, 44)
             val serverMs = (sec - NTP_EPOCH_DIFF_S) * 1000L + (frac * 1000L) / 4_294_967_296L
             val rttMs = (recvMono - sendMono) / 1_000_000
