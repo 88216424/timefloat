@@ -24,6 +24,13 @@ enum Http {
         f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
         return f
     }()
+    private static let httpDateLock = NSLock()
+
+    static func parseHttpDate(_ raw: String) -> Date? {
+        httpDateLock.lock()
+        defer { httpDateLock.unlock() }
+        return httpDateFmt.date(from: raw)
+    }
 
     static func get(_ url: String,
                     timeout: TimeInterval = Cfg.httpTimeout,
@@ -42,7 +49,7 @@ enum Http {
         let body = String(data: data, encoding: .utf8) ?? ""
         var dateMs: Int64 = -1
         if let raw = http?.value(forHTTPHeaderField: "Date"),
-           let d = httpDateFmt.date(from: raw) {
+           let d = parseHttpDate(raw) {
             dateMs = Int64(d.timeIntervalSince1970 * 1000)
         }
         return HttpResult(status: http?.statusCode ?? 0,

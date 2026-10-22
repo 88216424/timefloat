@@ -55,19 +55,22 @@ jobs:
             archive
 
       - name: 打成未签名 .ipa（Payload 结构）
+        id: package
         run: |
           set -e
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' ios/TimeFloat/Info.plist)
           APP="ios/build/TimeFloat.xcarchive/Products/Applications/TimeFloat.app"
           test -d "$APP" || { echo "没找到 TimeFloat.app"; find ios/build -maxdepth 5 -name '*.app'; exit 1; }
           rm -rf ios/build/Payload && mkdir -p ios/build/Payload
           cp -R "$APP" ios/build/Payload/
-          cd ios/build && zip -qr TimeFloat-unsigned.ipa Payload
-          ls -lh TimeFloat-unsigned.ipa
+          cd ios/build && zip -qr "TimeFloat-v$VERSION-unsigned.ipa" Payload
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          ls -lh "TimeFloat-v$VERSION-unsigned.ipa"
           echo "Bundle ID: $BUNDLE_ID"
 
       - name: 上传 ipa
         uses: actions/upload-artifact@v4
         with:
-          name: TimeFloat-unsigned-ipa
-          path: ios/build/TimeFloat-unsigned.ipa
+          name: TimeFloat-v${{ steps.package.outputs.version }}-unsigned-ipa
+          path: ios/build/TimeFloat-v${{ steps.package.outputs.version }}-unsigned.ipa
           if-no-files-found: error

@@ -4,10 +4,11 @@
 悬浮窗显示哪一路（北京 / 淘宝 / 京东）**在主界面启动之前选好**，窗口起来后锁定不再提供切换。
 
 ```
+
 dist\
-    三源对时-v1.0.apk      ← Android 已编译好，0.67MB，debug 签名，直接装
-    （iOS 的 .ipa 不在这里：苹果的 iOS 二进制只能在 macOS + Xcode 上编译，
-      本工程提供一键脚本和云编译两条路，见第六节）
+    TimeFloat-v1.2.apk    ← Android Release APK
+    TimeFloat-v1.2-unsigned.ipa ← iOS 未签名包（需 macOS + Xcode 或 GitHub Actions）
+    历史版本保留，不使用旧文件名覆盖
 android\                    ← Android 完整工程（Kotlin，零第三方依赖）
 ios\                        ← iOS 完整工程（Swift，单 target，带 PiP 渲染器）
 tools\check_sources.ps1     ← Windows 实测三个时间源
@@ -16,6 +17,10 @@ tools\check_sources.sh      ← macOS 版
 tools\build-ipa.sh          ← macOS 上一条命令打 .ipa
 .github\workflows\ios-ipa.yml ← 没有 Mac？推到 GitHub 让云 runner 帮你打 .ipa
 ```
+
+## 版本迭代
+
+- `v1.2`（versionCode/build 3）：修复 iOS 并发 HTTP Date 解析的数据竞争；统一复用带锁的日期解析器；Android/iOS 版本号同步递增。打包产物使用带版本号的文件名，保留 `v1.0`、`v1.1` 历史文件。
 
 ---
 
@@ -143,7 +148,7 @@ tools\build-ipa.sh          ← macOS 上一条命令打 .ipa
 ## 五、Android 安装与编译
 
 ```powershell
-adb install -r dist\三源对时-v1.0.apk      # 覆盖安装不用卸载
+adb install -r dist\TimeFloat-v1.2.apk
 ```
 首次使用：允许「显示在其他应用上层」→ 点一行选源 → 点「启动悬浮窗」→ 切出去就挂在屏幕上了。
 
@@ -169,7 +174,7 @@ cd android
 ```bash
 # ① Mac 上一条命令打 ipa（未签名版，给 AltStore/Sideloadly 自己签）
 bash tools/build-ipa.sh
-# 输出：dist/TimeFloat-unsigned.ipa
+# 输出：dist/TimeFloat-v1.2-unsigned.ipa
 
 # ② 想在 Mac 上直接开 Xcode 调试
 brew install xcodegen && cd ios && xcodegen generate && open TimeFloat.xcodeproj
@@ -207,7 +212,7 @@ cd ios && xcodegen generate && open TimeFloat.xcodeproj
 #   → 插上手机，⌘R
 
 # B. 有 Mac，想拿 ipa（给 AltStore/Sideloadly 用）
-bash tools/build-ipa.sh                                    # → dist/TimeFloat-unsigned.ipa
+bash tools/build-ipa.sh                                    # → dist/TimeFloat-v1.2-unsigned.ipa
 BUNDLE_ID=com.你的名字.timefloat bash tools/build-ipa.sh    # 包名撞了就换一个
 
 # C. 没 Mac → GitHub Actions 云编译，下载 Artifacts 里的 ipa
@@ -333,9 +338,9 @@ iOS 侧同样的两个隐患（探针无预算、没有自愈）也一起补齐�
 
 **本轮自证的产物信息**（都可核对）：
 ```
-Android : package=com.yesha.timefloat  versionCode=2  versionName=1.1  minSdk=24 targetSdk=36
+Android : package=com.yesha.timefloat  versionCode=3  versionName=1.2  minSdk=24 targetSdk=36
           图标 → res/BW.xml（自适应图标）   label=三源对时
-iOS     : CFBundleShortVersionString=1.1  CFBundleVersion=2
+iOS     : CFBundleShortVersionString=1.2  CFBundleVersion=3
           CFBundleIcons=AppIcon60x60  含 AppIcon png 2 个
 ```
 

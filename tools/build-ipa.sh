@@ -7,7 +7,7 @@
 #    BUNDLE_ID=com.你的名字.timefloat bash tools/build-ipa.sh   # 换包名，避免和已装的 app 冲突
 #    DEVELOPMENT_TEAM=ABCDE12345 bash tools/build-ipa.sh        # 有开发者证书就直接打「已签名」.ipa
 #
-#  产物：dist/TimeFloat-unsigned.ipa  或  dist/TimeFloat.ipa
+#  产物：dist/TimeFloat-v<VERSION>-unsigned.ipa  或  dist/TimeFloat-v<VERSION>.ipa
 # =============================================================================
 set -euo pipefail
 
@@ -21,6 +21,7 @@ PROJECT="$IOS_DIR/TimeFloat.xcodeproj"
 TEAM="${DEVELOPMENT_TEAM:-}"
 # 免费 Apple ID 签名时，包名建议改成你自己的，免得和已经装过的 app 撞
 BUNDLE_ID="${BUNDLE_ID:-com.yesha.timefloat}"
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$IOS_DIR/TimeFloat/Info.plist")
 
 mkdir -p "$OUT_DIR" "$BUILD_DIR"
 
@@ -68,9 +69,9 @@ if [ -n "$TEAM" ]; then
     -exportPath "$BUILD_DIR/export" \
     -allowProvisioningUpdates | tail -5
   IPA="$(find "$BUILD_DIR/export" -name '*.ipa' | head -1)"
-  cp "$IPA" "$OUT_DIR/TimeFloat.ipa"
+  cp "$IPA" "$OUT_DIR/TimeFloat-v$VERSION.ipa"
   echo "==> 5/5 完成"
-  echo "    $OUT_DIR/TimeFloat.ipa"
+  echo "    $OUT_DIR/TimeFloat-v$VERSION.ipa"
 else
   echo "==> 4/5 打包未签名 .ipa（Payload 结构，给 AltStore / Sideloadly 用）"
   APP="$ARCHIVE/Products/Applications/$SCHEME.app"
@@ -78,10 +79,11 @@ else
   rm -rf "$BUILD_DIR/Payload"
   mkdir -p "$BUILD_DIR/Payload"
   cp -R "$APP" "$BUILD_DIR/Payload/"
-  (cd "$BUILD_DIR" && rm -f TimeFloat-unsigned.ipa && zip -qr TimeFloat-unsigned.ipa Payload)
-  cp "$BUILD_DIR/TimeFloat-unsigned.ipa" "$OUT_DIR/TimeFloat-unsigned.ipa"
+  IPA_NAME="TimeFloat-v$VERSION-unsigned.ipa"
+  (cd "$BUILD_DIR" && zip -qr "$IPA_NAME" Payload)
+  cp "$BUILD_DIR/$IPA_NAME" "$OUT_DIR/$IPA_NAME"
   echo "==> 5/5 完成"
-  echo "    $OUT_DIR/TimeFloat-unsigned.ipa"
+  echo "    $OUT_DIR/$IPA_NAME"
   echo ""
   echo "下一步（用你自己的 Apple ID 签名安装）："
   echo "  1) 电脑装 AltStore(AltServer) 或 Sideloadly，手机用数据线连电脑"
