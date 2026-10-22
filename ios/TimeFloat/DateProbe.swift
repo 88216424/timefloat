@@ -11,16 +11,16 @@ struct DateSample {
     let monoAtRecvMs: Int64
 }
 
-private let httpDateFmt: DateFormatter = {
-    let f = DateFormatter()
-    f.locale = Locale(identifier: "en_US_POSIX")
-    f.timeZone = TimeZone(identifier: "GMT")
-    f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-    return f
-}()
-
 /// 只取响应头的极轻量探针（不读 body）
 enum DateProbe {
+    private static func parseHttpDate(_ raw: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: raw)
+    }
+
     static func probe(_ url: String,
                       timeout: TimeInterval = Cfg.dateProbeTimeout,
                       headers: [String: String] = [:]) async -> DateSample? {
@@ -43,7 +43,7 @@ enum DateProbe {
             let t1 = monoMs()
             defer { _ = stream }
             guard let http = resp as? HTTPURLResponse, (200...499).contains(http.statusCode) else { return nil }
-            guard let raw = http.value(forHTTPHeaderField: "Date"), let d = httpDateFmt.date(from: raw) else { return nil }
+            guard let raw = http.value(forHTTPHeaderField: "Date"), let d = parseHttpDate(raw) else { return nil }
             let dateMs = Int64(d.timeIntervalSince1970 * 1000)
             let rtt = t1 - t0
             // L = 服务器生成该响应时的本地单调时刻 ≈ 收到响应头时刻 - 单程时延

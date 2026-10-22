@@ -49,13 +49,25 @@ enum SntpClient {
                                 finish(.failure(SntpError.badPacket)); return
                             }
                             let b = [UInt8](data)
+                            let mode = b[0] & 0x07
+                            guard mode == 4 || mode == 5 else {
+                                finish(.failure(SntpError.badPacket)); return
+                            }
+                            let stratum = Int(b[1])
+                            guard (1...15).contains(stratum) else {
+                                finish(.failure(SntpError.badPacket)); return
+                            }
                             let sec = u32(b, 40)
+                            let unixSec = sec - ntpEpochDiff
+                            guard (1_577_836_800...2_208_988_800).contains(unixSec) else {
+                                finish(.failure(SntpError.badPacket)); return
+                            }
                             let frac = u32(b, 44)
-                            let ms = (sec - ntpEpochDiff) * 1000 + (frac * 1000) / 4_294_967_296
+                            let ms = unixSec * 1000 + (frac * 1000) / 4_294_967_296
                             let rtt = t1 - t0
                             finish(.success(Reply(serverUtcMsAtRecv: ms + rtt / 2,
                                                   rttMs: rtt,
-                                                  stratum: Int(b[1]),
+                                                  stratum: stratum,
                                                   host: host)))
                         }
                     })
