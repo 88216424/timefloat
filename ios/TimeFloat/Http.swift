@@ -34,7 +34,12 @@ enum Http {
 
     static func get(_ url: String,
                     timeout: TimeInterval = Cfg.httpTimeout,
-                    headers: [String: String] = [:]) async throws -> HttpResult {
+                    headers: [String: String] = [:],
+                    /// ★ 响应体硬上限（与 Android 端 256KB 对齐）。
+                    ///   URLSession 的 `timeoutInterval` 只是"两个数据包之间的空闲超时"，
+                    ///   服务器只要每 <5 秒吐一点数据，`data(for:)` 就能无限下载下去。
+                    ///   校时实际只需要几十字节（淘宝的 t 字段），超限直接判失败换源。
+                    maxBytes: Int = 256 * 1024) async throws -> HttpResult {
         guard let u = URL(string: url) else { throw NSError(domain: "TimeFloat", code: -1) }
         var req = URLRequest(url: u)
         req.timeoutInterval = timeout
@@ -43,7 +48,17 @@ enum Http {
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
 
         let t0 = monoMs()
-        let (data, resp) = try await URLSession.shared.data(for: req)
+        let (stream, resp) = try await URLSession.shared.bytes(for: req)
+        var data = Data()
+        data.reserveCapacity(4096)
+        for try await byte in stream {
+            data.append(byte)
+            if data.count > maxBytes {
+                stream.task.cancel()
+                throw NSError(domain: "TimeFloat", code: -2,
+                              userInfo: [NSLocalizedDescriptionKey: "响应体超过 \(maxBytes / 1024)KB，已放弃"])
+            }
+        }
         let t1 = monoMs()
         let http = resp as? HTTPURLResponse
         let body = String(data: data, encoding: .utf8) ?? ""

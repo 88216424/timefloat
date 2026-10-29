@@ -33,7 +33,9 @@ enum DateProbe {
             // bytes(for:) 在响应头到齐时就返回，不会等 body —— 和 Android 端只取响应头等价
             let (stream, resp) = try await URLSession.shared.bytes(for: req)
             let t1 = monoMs()
-            defer { _ = stream }
+            // 只要响应头，body 一个字节都不要：这里直接把任务取消掉
+            // （以前写的是 `defer { _ = stream }`，等于什么都不做，任务自己要等 body 收完）
+            defer { stream.task.cancel() }
             guard let http = resp as? HTTPURLResponse, (200...499).contains(http.statusCode) else { return nil }
             guard let raw = http.value(forHTTPHeaderField: "Date"), let d = Http.parseHttpDate(raw) else { return nil }
             let dateMs = Int64(d.timeIntervalSince1970 * 1000)

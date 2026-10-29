@@ -56,6 +56,13 @@ struct ContentView: View {
 
     // MARK: - 顶部
 
+    /// 版本号：跟 Android 端底部脚注对齐，让"设备上装的是哪一版"一眼可见
+    private var appVersion: String {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return "v\(v) (\(b))"
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             Image(systemName: "clock.badge.checkmark")
@@ -65,7 +72,7 @@ struct ContentView: View {
                 Text("三源对时")
                     .font(.system(size: 26, weight: .bold))
                     .foregroundStyle(Palette.textPrimary)
-                Text("三路服务器时间 · 毫秒级 · 抢购对时")
+                Text("三路服务器时间 · 毫秒级 · \(appVersion)")
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.textTertiary)
             }
