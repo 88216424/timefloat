@@ -182,11 +182,15 @@ struct ContentView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.textSecondary)
 
-            Button(pip.isActive ? "收起画中画悬浮窗" : "启动画中画悬浮窗") {
+            // 按钮文案要反映真实的三个阶段：启动中（系统动画未走完）/ 已悬浮 / 未启动。
+            // 启动中禁用按钮，避免用户以为没反应又点一次。
+            Button(pip.isActive ? "收起画中画悬浮窗"
+                   : (pip.isStarting ? "正在启动…" : "启动画中画悬浮窗")) {
                 if pip.isActive { pip.stop() } else { pip.start() }
             }
             .buttonStyle(.borderedProminent)
             .tint(Palette.accent)
+            .disabled(pip.isStarting)
 
             HStack(spacing: 10) {
                 Button("立即校时") { hub.refreshAll() }

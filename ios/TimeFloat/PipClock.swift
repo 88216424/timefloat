@@ -23,6 +23,10 @@ final class PipClockRenderer: NSObject, ObservableObject {
     let displayLayer = AVSampleBufferDisplayLayer()
 
     @Published var isActive = false
+    /// 已经请求启动、但系统的过渡动画还没走完（iOS 从调用 startPictureInPicture() 到
+    /// didStartPictureInPicture 回调有 0.3~1 秒）。这段时间界面必须显示"正在启动"，
+    /// 否则用户会以为第一次点击只是"就绪"、又去点第二次。
+    @Published var isStarting = false
     @Published var status = "未开启"
 
     private var pip: AVPictureInPictureController?
@@ -36,6 +40,8 @@ final class PipClockRenderer: NSObject, ObservableObject {
     private var possibleObs: NSKeyValueObservation?
     /// 用户已经点了"启动"、正在等系统就绪
     private var wantStart = false
+    /// 已经发出 startPictureInPicture 请求的次数（用于"静默无效"时的自动补点）
+    private var startAttempts = 0
     /// 帧计数：画中画没开时降频，只维持 App 内预览
     private var tickCount = 0
 
@@ -80,11 +86,10 @@ final class PipClockRenderer: NSObject, ObservableObject {
 
         // 已经建过控制器：直接请求启动；此刻还没就绪就交给 KVO 补上
         if let p = pip {
-            wantStart = true
             if p.isPictureInPicturePossible {
-                wantStart = false
-                p.startPictureInPicture()
+                requestStart(p)
             } else {
+                wantStart = true
                 status = "正在启动画中画…"
             }
             return
@@ -105,19 +110,59 @@ final class PipClockRenderer: NSObject, ObservableObject {
         possibleObs = controller.observe(\.isPictureInPicturePossible, options: [.new]) { [weak self] c, _ in
             guard let self = self else { return }
             if c.isPictureInPicturePossible && self.wantStart {
-                self.wantStart = false
-                c.startPictureInPicture()
+                self.requestStart(c)
             }
         }
 
         pip = controller
-        wantStart = true
         if controller.isPictureInPicturePossible {
-            wantStart = false
-            controller.startPictureInPicture()
-            status = "画中画已就绪"
+            requestStart(controller)
         } else {
+            wantStart = true
             status = "正在启动画中画…"
+        }
+    }
+
+    /// 统一的"请求启动"入口。
+    ///
+    /// 为什么要延迟一帧 + 连续重试：iOS 上**第一次**调用 `startPictureInPicture()`
+    /// 经常"静默无效"——既不走 `didStartPictureInPicture`，也不走 failed 回调，
+    /// 界面就停在"正在启动/已就绪"不动。常见原因是音频会话刚 `setActive(true)`
+    /// 还没稳定、或控制器刚创建还没走完一次 runloop。
+    /// 用户体感就是"点一次没反应，必须点第二次"，而第二次能成正是因为环境已经就绪。
+    ///
+    /// 这里改成：下一帧再请求 + 最多 4 次（0 / 0.3 / 0.6 / 1.0 秒）补点，
+    /// 等价于帮用户把"第二次点击"自动做掉。
+    private func requestStart(_ controller: AVPictureInPictureController) {
+        wantStart = false
+        isStarting = true
+        status = "正在启动画中画…"
+        startAttempts = 0
+        tryStart(controller)
+    }
+
+    private func tryStart(_ controller: AVPictureInPictureController) {
+        let delays: [Double] = [0, 0.3, 0.6, 1.0]
+        guard startAttempts < delays.count else {
+            isStarting = false
+            status = "启动超时，请再点一次"
+            return
+        }
+        let delay = delays[startAttempts]
+        startAttempts += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak controller] in
+            guard let self = self, let c = controller else { return }
+            // 已经成功（didStart 回调会置 isActive）或被用户取消，就别再点了
+            guard self.isStarting, !self.isActive else { return }
+            if c.isPictureInPictureActive {
+                self.isStarting = false
+                self.isActive = true
+                return
+            }
+            if c.isPictureInPicturePossible {
+                c.startPictureInPicture()
+            }
+            self.tryStart(c)   // 排下一次（次数用完会在开头给出超时提示）
         }
     }
 
@@ -125,6 +170,7 @@ final class PipClockRenderer: NSObject, ObservableObject {
     /// 否则画面会在关闭动画期间变黑）
     func stop() {
         wantStart = false
+        isStarting = false
         if let p = pip, p.isPictureInPictureActive {
             p.stopPictureInPicture()
             status = "正在关闭…"
@@ -140,7 +186,8 @@ final class PipClockRenderer: NSObject, ObservableObject {
         possibleObs = nil
         pip = nil
         isActive = false
-        status = "已关闭"
+        isStarting = false
+        status = "点一下启动画中画"
     }
 
     /// 兜底提示：正常情况 KVO 会在几百毫秒内把画中画拉起来，
@@ -148,8 +195,13 @@ final class PipClockRenderer: NSObject, ObservableObject {
     private func armStartTimeout() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self = self else { return }
-            if self.wantStart && !self.isActive {
+            // 两种没成的形态都要兜住：
+            //   ① 还在等系统就绪（wantStart）② 已经请求了 startPictureInPicture()
+            //   但系统既没回调 didStart 也没回调 failed（isStarting 卡住）
+            //   否则按钮会一直停在"正在启动…"且被禁用，用户彻底没法操作。
+            if !self.isActive && (self.wantStart || self.isStarting) {
                 self.wantStart = false
+                self.isStarting = false
                 self.status = "启动超时，请再点一次"
             }
         }
@@ -366,6 +418,7 @@ extension PipClockRenderer: AVPictureInPictureControllerDelegate {
 
     func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
         wantStart = false
+        isStarting = false
         isActive = true
         status = "悬浮中（画中画窗口）"
     }
@@ -379,13 +432,15 @@ extension PipClockRenderer: AVPictureInPictureControllerDelegate {
 
     func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
         isActive = false
-        status = "画中画已收起"
+        isStarting = false
+        status = "画中画已收起，点一下重新启动"
         // 用户点浮窗上的 X 也会走到这里；定时器留着继续给 App 内预览降频重绘
     }
 
     func pictureInPictureController(_ controller: AVPictureInPictureController,
                                     failedToStartPictureInPictureWithError error: Error) {
         wantStart = false
+        isStarting = false
         isActive = false
         status = "画中画启动失败：\(error.localizedDescription)"
     }
